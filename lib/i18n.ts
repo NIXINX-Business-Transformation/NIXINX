@@ -45,7 +45,8 @@ export const words={
    ['How we use it','We use it to review and respond to your inquiry, evaluate a potential business relationship and maintain appropriate follow-up records.'],
    ['Where information is stored','Inquiry records are stored in the configured NIXINX-controlled Firebase/Firestore project. We do not place them in a customer Data Warehouse.'],
    ['Your choices','You may request access, correction or deletion by contacting the organization using the contact information published on this website. Records are retained only as needed for the stated purpose and applicable obligations.'],
-   ['Security and third parties','The form uses server-side validation and abuse controls. Infrastructure providers may process information on our behalf under their own terms. No information is sold through this form.']
+   ['Security and third parties','The form uses server-side validation and abuse controls. Infrastructure providers may process information on our behalf under their own terms. No information is sold through this form.'],
+   ["Assessment on Zite","The separate restaurant diagnostic is hosted by Zite. Information provided there, its saved answers and generated reports are handled and stored in the Zite application, not in this corporate contact form’s Firestore collection. The assessment provides its own consent choices. NIXINX may access those responses for diagnosis and follow-up according to the stated choices. Please review the applicable Zite and NIXINX terms before completing it."]
   ],privacyBack:'Return to website',privacyDate:'Working notice · November 2026 · Confirm legal identity and business contact before public launch.'
  },
  es:{
@@ -92,7 +93,8 @@ export const words={
    ['Uso de información','Los utilizamos para atender tu consulta, evaluar una posible relación comercial y dar seguimiento.'],
    ['Almacenamiento','Los registros se almacenan en el proyecto Firebase/Firestore configurado y controlado por NIXINX. No se mezclan con el Data Warehouse de un cliente.'],
    ['Tus opciones','Puedes solicitar acceso, corrección o eliminación mediante el contacto publicado en este sitio. Conservamos registros sólo mientras sean necesarios para su finalidad y obligaciones aplicables.'],
-   ['Seguridad y terceros','El formulario valida datos en servidor y usa controles contra abuso. Los proveedores de infraestructura pueden procesar información bajo sus términos. No vendemos datos recopilados por el formulario.']
+   ['Seguridad y terceros','El formulario valida datos en servidor y usa controles contra abuso. Los proveedores de infraestructura pueden procesar información bajo sus términos. No vendemos datos recopilados por el formulario.'],
+   ["Diagnóstico en Zite","El diagnóstico de restaurantes es una aplicación independiente alojada en Zite. Los datos que proporciones allí, sus respuestas y reportes se manejan y almacenan en Zite, no en Firestore del formulario de contacto corporativo. El diagnóstico cuenta con opciones de consentimiento propias. NIXINX podrá consultar las respuestas para evaluación y seguimiento conforme a lo que autorices. Revisa los términos aplicables de Zite y NIXINX antes de completarlo."]
   ],privacyBack:'Volver al sitio',privacyDate:'Aviso en revisión · Noviembre de 2026 · Confirmar razón social y contacto antes de publicar.'
  },
  fr:{
@@ -139,7 +141,8 @@ export const words={
    ['Utilisation','Nous utilisons ces renseignements pour répondre à votre demande, évaluer une relation commerciale et assurer un suivi approprié.'],
    ['Stockage','Les demandes sont conservées dans le projet Firebase/Firestore configuré et contrôlé par NIXINX, sans les mélanger aux entrepôts de données clients.'],
    ['Vos choix','Vous pouvez demander l’accès, la correction ou la suppression par les coordonnées publiées sur ce site. Les dossiers sont conservés seulement selon les besoins et obligations applicables.'],
-   ['Sécurité et tiers','Le formulaire comprend une validation côté serveur et des contrôles anti-abus. Les fournisseurs d’infrastructure peuvent traiter les renseignements selon leurs conditions. Aucune donnée du formulaire n’est vendue.']
+   ['Sécurité et tiers','Le formulaire comprend une validation côté serveur et des contrôles anti-abus. Les fournisseurs d’infrastructure peuvent traiter les renseignements selon leurs conditions. Aucune donnée du formulaire n’est vendue.'],
+   ["Diagnostic sur Zite","Le diagnostic pour restaurants est hébergé dans une application Zite distincte. Les renseignements, réponses et rapports sont traités et conservés dans Zite, et non dans la collection Firestore du formulaire de contact du site. Le diagnostic comporte ses propres choix de consentement. NIXINX peut consulter les réponses pour l’évaluation et le suivi selon vos autorisations. Consultez les conditions applicables de Zite et NIXINX avant de le remplir."]
   ],privacyBack:'Retour au site',privacyDate:'Avis provisoire · Novembre 2026 · Confirmer l’entité juridique et les coordonnées avant publication.'
  }
 };
