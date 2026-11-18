@@ -1,16 +1,1 @@
-{
-  "name": "NIXINX Business Transformation",
-  "short_name": "NIXINX",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#071d29",
-  "theme_color": "#071d29",
-  "icons": [
-    {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    }
-  ]
-}
+{"name":"NIXINX — Business Transformation","short_name":"NIXINX","description":"Technology, information and performance for growing businesses","start_url":"/en","scope":"/","display":"standalone","background_color":"#091923","theme_color":"#091923","icons":[{"src":"/icon","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
