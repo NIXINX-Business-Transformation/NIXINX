@@ -10,8 +10,8 @@
 ## Corporate entry point
 
 - /en/assessment, /es/assessment, /fr/assessment are localized **corporate landing pages**.
-- Each page loads the **same** Zite survey only after a visitor clicks Start, with an always-visible direct link fallback.
-- A Zite embed may be blocked by app-level frame policy or content blockers; the fallback launches the original Zite link.
+- Each page mounts the **same** Zite survey through the exact proven Zite SDK integration from `business-transformation/src/components/RestaurantAssessment.tsx` (`data-zite-id=vv7qctrcfg` and `https://server.zite.com/embed/v2-zite/`) only after a visitor clicks Start, with an always-visible direct link fallback.
+- The Zite SDK may be blocked by browser extensions or network policy; the fallback launches the original Zite link. The old deployment used this SDK successfully; verify it also works in the new Next.js site on desktop and mobile.
 - Homepage nav and a restaurant-specific CTA point to these routes.
 - These pages provide disclosure that survey records are stored on Zite, not in the Firebase leads collection of the corporate website.
 - /privacy redirects to the existing localized /{locale}/privacy notice, preserving the historical URL used by Zite. The policy and Zite app privacy link need legal and language-specific review.
