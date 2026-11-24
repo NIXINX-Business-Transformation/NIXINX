@@ -150,3 +150,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 @media(max-width:750px){
  .hero-facade{left:auto;animation:none}
 }
+
+/* Approved navigation palette: near-black green, restrained mint separator. */
+.site-header{background:#081210;border-bottom:1px solid #83dfc7;color:#f6faf9}
+.site-header .brand-roll .brand-rotor{display:none;animation:none}
+.site-header .brand-roll .brand-static{display:block}
+@media(max-width:1050px){.site-header .main-nav{background:#081210;border-bottom-color:#83dfc7}}
