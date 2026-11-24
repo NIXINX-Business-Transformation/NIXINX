@@ -1,1 +1,25 @@
-{"name":"NIXINX — Business Transformation","short_name":"NIXINX","description":"Technology, information and performance for growing businesses","start_url":"/en","scope":"/","display":"standalone","background_color":"#091923","theme_color":"#091923","icons":[{"src":"/icon","sizes":"512x512","type":"image/png","purpose":"any maskable"}]}
+{
+  "name": "NIXINX — Business Transformation",
+  "short_name": "NIXINX",
+  "description": "Technology, information and performance for growing businesses",
+  "start_url": "/en",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#19282e",
+  "theme_color": "#19282e",
+  "icons": [
+    {
+      "src": "/icon-192",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "id": "/"
+}

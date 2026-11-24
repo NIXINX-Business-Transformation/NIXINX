@@ -4,6 +4,8 @@ import Link from 'next/link';
 import Script from 'next/script';
 import type { Locale } from '@/lib/i18n';
 import { words } from '@/lib/i18n';
+import {BrandMark,Wordmark,PillarIcon} from '@/components/brand';
+import {executiveCopy} from '@/lib/executive-copy';
 
 type TurnstileClient={render:(element:HTMLElement,settings:Record<string,unknown>)=>string;reset?:()=>void};
 declare global {interface Window {turnstile?:TurnstileClient}}
@@ -39,16 +41,23 @@ function LeadForm({locale}:{locale:Locale}){
   </form>
 }
 export default function Site({locale}:{locale:Locale}){
-  const t=words[locale];const [menu,setMenu]=useState(false);
+  const t=words[locale];const e=executiveCopy[locale];const [menu,setMenu]=useState(false);
   useEffect(()=>{document.documentElement.lang=locale},[locale]);
   return <>
-    <header className="site-header"><div className="nav-wrap"><Link className="logo" href={`/${locale}`} aria-label="NIXINX"><span className="logo-square">N<span>.</span></span><span className="logo-word">NIXINX<small>BUSINESS TRANSFORMATION</small></span></Link>
-      <nav className={menu?'main-nav is-open':'main-nav'} aria-label="Main navigation">{t.nav.map((name,i)=><a key={sections[i]} onClick={()=>setMenu(false)} href={`#${sections[i]}`}>{name}</a>)}<Link className="nav-assessment" href={`/${locale}/assessment`} onClick={()=>setMenu(false)}>{t.assessment.nav}</Link></nav>
-      <div className="nav-side"><div className="lang" aria-label="Language selection">{(['en','es','fr'] as Locale[]).map(code=><Link key={code} href={`/${code}`} aria-current={code===locale?'page':undefined} hrefLang={code} lang={code} onClick={()=>{document.cookie=`nixinx_locale=${code}; Path=/; Max-Age=31536000; SameSite=Lax`;}}>{code.toUpperCase()}</Link>)}</div><a className="nav-action" href="#contact">{t.cta} <span>↗</span></a><button className="menu-trigger" onClick={()=>setMenu(!menu)} aria-expanded={menu} aria-label="Toggle menu">{menu?'✕':'☰'}</button></div></div></header>
+    <header className="site-header"><div className="nav-wrap"><Link className="logo" href={`/${locale}`} aria-label="NIXINX"><BrandMark roll/><Wordmark/></Link>
+      <nav id="main-navigation" className={menu?'main-nav is-open':'main-nav'} aria-label="Main navigation">{t.nav.map((name,i)=><a key={sections[i]} onClick={()=>setMenu(false)} href={`#${sections[i]}`}>{name}</a>)}<Link className="nav-assessment" href={`/${locale}/assessment`} onClick={()=>setMenu(false)}>{t.assessment.nav}</Link></nav>
+      <div className="nav-side"><div className="lang" aria-label="Language selection">{(['en','es','fr'] as Locale[]).map(code=><Link key={code} href={`/${code}`} aria-current={code===locale?'page':undefined} hrefLang={code} lang={code} onClick={()=>{document.cookie=`nixinx_locale=${code}; Path=/; Max-Age=31536000; SameSite=Lax`;}}>{code.toUpperCase()}</Link>)}</div><a className="nav-action" href="#contact">{t.cta} <span>↗</span></a><button className="menu-trigger" onClick={()=>setMenu(!menu)} aria-expanded={menu} aria-controls="main-navigation" aria-label={locale==='es'?'Abrir o cerrar menú':locale==='fr'?'Ouvrir ou fermer le menu':'Toggle menu'}>{menu?'✕':'☰'}</button></div></div></header>
     <main>
-      <section className="hero" id="top"><div className="hero-glow"/><div className="hero-copy"><div className="eyebrow"><span className="dot"/>{t.heroEyebrow}</div><h1>{t.heroA}<br/><em>{t.heroB}</em><br/>{t.heroC}</h1><p className="hero-lead">{t.heroText}</p><div className="hero-actions"><a className="button primary" href="#contact">{t.heroCta} <span>↗</span></a><a className="button subtle" href="#approach">{t.heroLink} <span>→</span></a></div><div className="hero-pills">{t.heroPills.map(item=><span key={item}><b>✓</b>{item}</span>)}</div></div>
-        <div className="orbital" aria-label="Connected NIXINX business services"><div className="orbital-lines line-one"/><div className="orbital-lines line-two"/><div className="orbital-core">N<span>.</span><small>CONNECTED</small></div><div className="orbital-label o1"><b>01</b> INFRA</div><div className="orbital-label o2"><b>02</b> SOFTWARE</div><div className="orbital-label o3"><b>03</b> ENGINE</div><div className="orbital-label o4"><b>04</b> MI + PM</div><div className="orbit-caption">ONE CONNECTED OPERATING MODEL</div></div>
+      <section className="hero executive-hero" id="top">
+        <div className="hero-facade" aria-hidden="true"/>
+        <div className="hero-copy"><div className="eyebrow"><span className="hero-rule"/>BUSINESS TRANSFORMATION</div>
+          <h1>{e.a}<br/><em>{e.b}</em></h1><p className="hero-lead">{e.lead}</p>
+          <div className="hero-actions"><a className="button primary" href="#capabilities">{e.platform} <span aria-hidden="true">→</span></a><a className="button subtle" href="#approach">{e.how}</a></div>
+          <a className="hero-contact" href="#contact">{t.heroCta} ↗</a>
+        </div>
+        <div className="hero-pillars">{e.pillars.map(([label,desc],i)=><div className="hero-pillar" key={label}><PillarIcon name={['integrate','optimize','measure','manage','scale'][i]}/><strong>{label}</strong><span>{desc}</span></div>)}</div>
       </section>
+      <div className="section hero-continuity"><div><span className="tag">{t.heroEyebrow}</span><h2>{t.heroA} {t.heroB} {t.heroC}</h2><p>{t.heroText}</p></div><div className="continuity-actions"><a className="button primary" href="#contact">{t.heroCta} ↗</a><a className="button secondary" href="#approach">{t.heroLink} →</a><div className="hero-pills">{t.heroPills.map(item=><span key={item}><b>✓</b>{item}</span>)}</div></div></div>
       <section className="section vision" id="approach"><div><span className="tag">{t.visionTag}</span><h2>{t.visionTitle}</h2></div><div><p className="vision-lead">{t.visionLead}</p><p>{t.visionCopy}</p></div></section>
       <section className="section stages"><div className="section-heading"><div><span className="tag">{t.maturityTag}</span><h2>{t.maturityTitle}</h2></div><div className="heading-decoration">01—04</div></div><div className="stage-list">{t.maturity.map(([num,title,copy])=><article key={num} className="stage-item"><span>{num}</span><h3>{title}</h3><p>{copy}</p><b aria-hidden="true">↗</b></article>)}</div></section>
       <section className="section capabilities" id="capabilities"><div className="section-heading"><div><span className="tag">{t.capTag}</span><h2>{t.capTitle}</h2></div><p>{t.capIntro}</p></div><div className="capability-grid">{t.capabilities.map(([name,tag,desc],i)=><article key={name} className={'capability cap-'+i}><div className="cap-top"><span className="cap-icon">{icons[i]}</span><small>{tag}</small></div><div><h3>{name}</h3><p>{desc}</p></div><span className="cap-number">0{i+1}</span></article>)}</div></section>
