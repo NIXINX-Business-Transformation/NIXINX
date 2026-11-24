@@ -174,3 +174,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
  .site-header .nav-wrap{padding-inline:24px}
 }
 @media(min-width:1321px){.site-header .nav-wrap{gap:16px}.site-header .main-nav{gap:clamp(12px,1.2vw,22px)}}
+
+/* iOS: keep the navigation below the system status area, in Safari and standalone PWA. */
+@media(max-width:1050px){
+ :root{--mobile-nav-height:72px;--mobile-safe-top:env(safe-area-inset-top,0px)}
+ html{scroll-padding-top:calc(var(--mobile-nav-height) + var(--mobile-safe-top) + 12px)}
+ .site-header{position:fixed;top:0;left:0;right:0;width:100%;padding-top:var(--mobile-safe-top);z-index:1000;background:#081210;border-bottom:1px solid #83dfc7;-webkit-backdrop-filter:none;backdrop-filter:none}
+ .site-header .nav-wrap{height:var(--mobile-nav-height)}
+ .site-header + main{padding-top:calc(var(--mobile-nav-height) + var(--mobile-safe-top) + 1px)}
+ .site-header .main-nav{top:100%;max-height:calc(100vh - var(--mobile-nav-height) - var(--mobile-safe-top) - env(safe-area-inset-bottom,0px) - 1px);max-height:calc(100dvh - var(--mobile-nav-height) - var(--mobile-safe-top) - env(safe-area-inset-bottom,0px) - 1px);overflow-y:auto;overscroll-behavior:contain}
+ .site-header .nav-side{flex-shrink:0}
+ .site-header .lang a{min-height:44px}
+}
+@media(max-width:750px){:root{--mobile-nav-height:68px}}
+@media(max-width:360px){.site-header .nav-wrap{padding-left:max(9px,env(safe-area-inset-left,0px));padding-right:max(9px,env(safe-area-inset-right,0px))}}
