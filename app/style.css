@@ -156,3 +156,21 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 .site-header .brand-roll .brand-rotor{display:none;animation:none}
 .site-header .brand-roll .brand-static{display:block}
 @media(max-width:1050px){.site-header .main-nav{background:#081210;border-bottom-color:#83dfc7}}
+
+/* Approved static corporate monogram and executive header. */
+.site-header{background:#081210;border-bottom:1px solid #83dfc7}
+.site-header .brand-mark{background:linear-gradient(145deg,#203d37,#102522 70%,#224b41);border:1px solid #527a71;box-shadow:none;border-radius:12px}
+.site-header .brand-static{width:76%;height:76%}
+.site-header .main-nav a{font-weight:600}
+.footer-word .wordmark{color:inherit;width:152px;max-width:100%}
+.radar-center .brand-mark{width:64px;height:64px}
+@media(min-width:751px){
+ .executive-hero .hero-facade{inset:0 0 0 35%;background-image:linear-gradient(90deg,#1b2b31 0%,#1b2b31f0 12%,#1b2b3180 31%,transparent 53%),linear-gradient(0deg,#1b2b31 0%,transparent 30%),url('/images/nixinx-hero-facade.webp');background-size:100% 100%,100% 100%,auto 100%;background-position:center,center,right center;animation:none}
+}
+@media(min-width:1051px) and (max-width:1320px){
+ .site-header .nav-action{display:none}
+ .site-header .main-nav{gap:10px}
+ .site-header .main-nav a{font-size:14px}
+ .site-header .nav-wrap{padding-inline:24px}
+}
+@media(min-width:1321px){.site-header .nav-wrap{gap:16px}.site-header .main-nav{gap:clamp(12px,1.2vw,22px)}}
