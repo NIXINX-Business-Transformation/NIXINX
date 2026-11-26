@@ -6,7 +6,7 @@ const owner="nixinx-commercial-sandbox-v1";
 const hash=(v:string)=>createHash("sha256").update(v).digest("hex");
 export async function billingCustomer(db:Firestore,uid:string,profile:FirebaseFirestore.DocumentData,stripe:StripeCall):Promise<string>{
  const ref=db.collection("commercial_billing_customers").doc(uid);
- const binding=await db.runTransaction(async tx=>{
+ const binding=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{
   const snap=await tx.get(ref);
   if(snap.exists)return snap.data()!;
   const record={uid,environment:"sandbox",status:"creating",startedAtMs:Date.now()};
