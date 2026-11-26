@@ -86,7 +86,7 @@ export async function GET(req:NextRequest,{params}:Ctx){
  try{const action=(await params).action;if(action==='auth-config'){const key=process.env.CUSTOMER_FIREBASE_WEB_API_KEY,projectId=process.env.FIREBASE_PROJECT_ID;if(!key||projectId!=='nixinx-bt')return fail('NOT_CONFIGURED',503);return result({apiKey:key,projectId,authDomain:projectId+'.firebaseapp.com'});}if(action!=='account')return fail('NOT_FOUND',404);const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
  const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
- const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
+ const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),billingMode:d.get('billingMode')??'payment',subscriptionId:d.get('stripeSubscriptionId')??null,applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
  return result({email:u.email,profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
@@ -221,7 +221,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
   if(order.billingMode!=='subscription'||order.subtotal!==subtotal||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
-  const form=new URLSearchParams({mode:'subscription',customer,'automatic_tax[enabled]':'true',billing_address_collection:'required','customer_update[address]':'auto','subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
+  const form=new URLSearchParams({mode:'subscription',customer,'automatic_tax[enabled]':'true',billing_address_collection:'required','customer_update[address]':'auto','subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned&order='+orderId,cancel_url:base+'?checkout=cancelled'});
   selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');});
   const s=await stripe('checkout/sessions',form,'nx-sandbox-'+orderId);
   if(!/^cs_test_/.test(s.id)||typeof s.url!=='string')return fail('INVALID_CHECKOUT',503);
