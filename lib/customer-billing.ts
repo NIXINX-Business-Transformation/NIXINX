@@ -1,27 +1,36 @@
 import "server-only";
 import {createHash} from "node:crypto";
+import {legalBillingName} from "./commercial-profile-validation";
 import {FieldValue,type Firestore} from "firebase-admin/firestore";
 type StripeCall=(path:string,form?:URLSearchParams,key?:string)=>Promise<any>;
 const owner="nixinx-commercial-sandbox-v1";
 const hash=(v:string)=>createHash("sha256").update(v).digest("hex");
-export async function billingCustomer(db:Firestore,uid:string,profile:FirebaseFirestore.DocumentData,stripe:StripeCall):Promise<string>{
+export async function billingCustomer(db:Firestore,uid:string,profile:FirebaseFirestore.DocumentData,stripe:StripeCall,forNewCheckout=false):Promise<string>{
+ const legal=legalBillingName(profile.legalName);
+ if(forNewCheckout&&!legal)throw Error("PROFILE_REQUIRED");
  const ref=db.collection("commercial_billing_customers").doc(uid);
  const binding=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{
   const snap=await tx.get(ref);
   if(snap.exists)return snap.data()!;
-  const record={uid,environment:"sandbox",status:"creating",startedAtMs:Date.now()};
+  if(!legal||typeof profile.email!=="string"||!profile.email)throw Error("PROFILE_REQUIRED");
+  const record={uid,environment:"sandbox",status:"creating",startedAtMs:Date.now(),creationIdentity:{name:legal,email:profile.email}};
   tx.create(ref,record);return record;
  });
  if(binding.uid!==uid||binding.environment!=="sandbox")throw Error("BILLING_BINDING_INVALID");
  if(typeof binding.stripeCustomerId==="string"){
   const c=await stripe("customers/"+encodeURIComponent(binding.stripeCustomerId));
-  if(c.deleted||c.metadata?.nixinx_owner!==owner||c.metadata?.nixinx_uid_hash!==hash(uid))throw Error("BILLING_BINDING_INVALID");
+  if(c.deleted||c.id!==binding.stripeCustomerId||c.metadata?.nixinx_owner!==owner||c.metadata?.nixinx_uid_hash!==hash(uid))throw Error("BILLING_BINDING_INVALID");
+  if(forNewCheckout&&c.name!==legal)throw Error("BILLING_LEGAL_NAME_REVIEW");
   return c.id;
  }
  // Do not create a second customer after Stripe's idempotency retention window.
  if(typeof binding.startedAtMs!=="number"||Date.now()-binding.startedAtMs>20*3600000)throw Error("BILLING_RECONCILIATION_REQUIRED");
- const c=await stripe("customers",new URLSearchParams({name:String(profile.company),email:String(profile.email),"metadata[nixinx_owner]":owner,"metadata[nixinx_uid_hash]":hash(uid)}),"nx-customer-"+hash(uid));
- if(!/^cus_[A-Za-z0-9]+$/.test(c.id)||c.metadata?.nixinx_owner!==owner||c.metadata?.nixinx_uid_hash!==hash(uid))throw Error("BILLING_BINDING_INVALID");
+ // Persist the original payload before calling Stripe; never retry a legacy in-flight creation with changed parameters.
+ const identity=binding.creationIdentity;
+ if(!identity||!legalBillingName(identity.name)||typeof identity.email!=="string"||!identity.email)throw Error("BILLING_RECONCILIATION_REQUIRED");
+ if(forNewCheckout&&identity.name!==legal)throw Error("BILLING_LEGAL_NAME_REVIEW");
+ const c=await stripe("customers",new URLSearchParams({name:identity.name,email:identity.email,"metadata[nixinx_owner]":owner,"metadata[nixinx_uid_hash]":hash(uid)}),"nx-customer-"+hash(uid));
+ if(!/^cus_[A-Za-z0-9]+$/.test(c.id)||c.name!==identity.name||c.metadata?.nixinx_owner!==owner||c.metadata?.nixinx_uid_hash!==hash(uid))throw Error("BILLING_BINDING_INVALID");
  await db.runTransaction(async tx=>{
   const current=(await tx.get(ref)).data();
   if(!current||current.uid!==uid||(current.stripeCustomerId&&current.stripeCustomerId!==c.id))throw Error("BILLING_BINDING_INVALID");

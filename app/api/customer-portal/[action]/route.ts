@@ -6,7 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
-import {validateCommercialProfile,profileLimits,normalizeCanadianPostal} from '@/lib/commercial-profile-validation';
+import {validateCommercialProfile,profileLimits,normalizeCanadianPostal,legalBillingName} from '@/lib/commercial-profile-validation';
 import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl} from '@/lib/commercial-app-eligibility';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
@@ -290,6 +290,8 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const subtotal=selected.reduce((sum,item)=>sum+item.amount,0);
   const applicationIds=selected.map(i=>i.id).sort();
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  const errors=validateCommercialProfile(profile,true);const billingLegalName=legalBillingName(profile.legalName);
+  if(Object.keys(errors).length||!billingLegalName)return result({error:'PROFILE_REQUIRED',fields:errors},409);
   const taxPolicy=commercialTaxPolicy(profile);if(!taxPolicy)return fail('TAX_JURISDICTION_NOT_CONFIGURED',409);
   if(action==='tax-quote'){
    const previous=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
@@ -299,17 +301,17 @@ export async function POST(req:NextRequest,{params}:Ctx){
    return result(await quoteTax(stripe,taxPolicy,selected));
   }
   if(body.termsAccepted!==true||body.termsVersion!==CONSENT_VERSION)return fail('TERMS_REQUIRED',409);
-  const customer=await billingCustomer(db,u.uid,profile,stripe);
+  const customer=await billingCustomer(db,u.uid,profile,stripe,true);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
   const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists){const existing=old.data()!;if(existing.status==='pending_test'&&existing.terms?.version!==CONSENT_VERSION)throw Error('ORDER_REQUIRES_REVIEW');return existing;}
    const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
    if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
    const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
-   const value={terms:{version:CONSENT_VERSION,locale,acceptedBy:u.uid,acceptedAt:FieldValue.serverTimestamp()},billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
+   const value={terms:{version:CONSENT_VERSION,locale,acceptedBy:u.uid,acceptedAt:FieldValue.serverTimestamp()},billingMode:'subscription',uid:u.uid,profile:customerSnapshot,billingLegalName,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
   if(order.stripeSessionId){if(!resumableCommercialOrder(order,u.uid,CONSENT_VERSION))return fail('ORDER_REQUIRES_REVIEW',409);const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));const url=openCheckoutUrl(s,order,orderId);return url?result({url}):fail('ORDER_REQUIRES_REVIEW',409);}
-  if(order.billingMode!=='subscription'||order.subtotal!==subtotal||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
+  if(order.billingLegalName!==billingLegalName||order.stripeCustomerId!==customer||order.billingMode!=='subscription'||order.subtotal!==subtotal||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
   const form=new URLSearchParams({mode:'subscription',customer,'automatic_tax[enabled]':'true',billing_address_collection:'required','customer_update[address]':'auto','subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned&order='+orderId,cancel_url:base+'?checkout=cancelled'});
   selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');});
@@ -319,5 +321,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
