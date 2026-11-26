@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 const control="https://controlde.nixinx.org";
 const owner="nixinx-commercial-sandbox-v1";
 type Published={id:string;name:string;amount:number};
-type Price={id:string;active:boolean;livemode:boolean;unit_amount:number;currency:string;type:string;product:string};
+type Price={id:string;active:boolean;livemode:boolean;unit_amount:number;currency:string;type:string;recurring?:{interval:string;interval_count:number};product:string};
 type Product={id:string;name:string;active:boolean;livemode:boolean;metadata:Record<string,string>;default_price:Price|string|null};
 const productId=(id:string)=>"nixinx_"+createHash("sha256").update(id).digest("hex").slice(0,40);
 
@@ -45,14 +45,14 @@ async function listProducts():Promise<Product[]>{
 }
 function managed(p:Product){return p.metadata?.nixinx_catalog===owner&&typeof p.metadata?.app_id==="string"&&p.id===productId(p.metadata.app_id);}
 function validPrice(p:Product,amount:number):p is Product&{default_price:Price}{
- const v=p.default_price;return !!v&&typeof v==="object"&&v.active===true&&v.livemode===false&&v.unit_amount===amount&&v.currency==="cad"&&v.type==="one_time"&&v.product===p.id;
+ const v=p.default_price;return !!v&&typeof v==="object"&&v.active===true&&v.livemode===false&&v.unit_amount===amount&&v.currency==="cad"&&v.type==="recurring"&&v.recurring?.interval==="month"&&v.recurring.interval_count===1&&v.product===p.id;
 }
 export async function commercialCatalog(){
  const apps=await readPublished();if(!apps.length)return [];
  const products=await listProducts();
  return apps.flatMap(a=>{
   const p=products.find(p=>p.id===productId(a.id)&&managed(p)&&p.active&&p.name===a.name);
-  return p&&validPrice(p,a.amount)?[{id:a.id,name:a.name,amount:a.amount,currency:"cad",priceId:p.default_price.id}]:[];
+  return p&&validPrice(p,a.amount)?[{id:a.id,name:a.name,amount:a.amount,currency:"cad",interval:"month" as const,priceId:p.default_price.id}]:[];
  });
 }
 export async function reconcileStripe(token:string){
@@ -67,7 +67,7 @@ export async function reconcileStripe(token:string){
  for(const a of apps){
   const id=productId(a.id),existing=products.find(p=>p.id===id);
   if(!existing){
-   const form=new URLSearchParams({id,name:a.name,active:"true","metadata[nixinx_catalog]":owner,"metadata[app_id]":a.id,"default_price_data[currency]":"cad","default_price_data[unit_amount]":String(a.amount)});
+   const form=new URLSearchParams({id,name:a.name,active:"true","metadata[nixinx_catalog]":owner,"metadata[app_id]":a.id,"default_price_data[currency]":"cad","default_price_data[unit_amount]":String(a.amount),"default_price_data[recurring][interval]":"month"});
    await request("products",form,"nx-catalog-create-"+id);
    }else{
    const form=new URLSearchParams({active:"true",name:a.name});
@@ -75,8 +75,8 @@ export async function reconcileStripe(token:string){
     const query=new URLSearchParams({product:id,active:"true",limit:"100"});
     const page=await request("prices?"+query);
     if(page.has_more)throw Error("STRIPE_CATALOG_LIMIT");
-    const match=page.data.find((p:Price)=>p.livemode===false&&p.active&&p.unit_amount===a.amount&&p.currency==="cad"&&p.type==="one_time"&&p.product===id);
-    const price=match??await request("prices",new URLSearchParams({product:id,currency:"cad",unit_amount:String(a.amount)}),"nx-price-"+id+"-"+a.amount);
+    const match=page.data.find((p:Price)=>p.livemode===false&&p.active&&p.unit_amount===a.amount&&p.currency==="cad"&&p.type==="recurring"&&p.recurring?.interval==="month"&&p.recurring.interval_count===1&&p.product===id);
+    const price=match??await request("prices",new URLSearchParams({product:id,currency:"cad",unit_amount:String(a.amount),"recurring[interval]":"month"}),"nx-price-month-"+id+"-"+a.amount);
     form.set("default_price",price.id);
    }
    if(!existing.active||existing.name!==a.name||!validPrice(existing,a.amount))await request("products/"+encodeURIComponent(id),form);
