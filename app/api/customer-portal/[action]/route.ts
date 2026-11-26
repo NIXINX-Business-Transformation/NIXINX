@@ -6,6 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
+import { commercialTaxPolicy, ontarioTaxRate } from '@/lib/commercial-tax';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -72,7 +73,7 @@ async function webhook(req:NextRequest){
  }
  await db.runTransaction(async tx=>{
   const [old,prior]=await Promise.all([tx.get(ref),tx.get(out)]);const order=old.data();
-  if(!order||order.stripeSessionId!==id||(order.billingMode??'payment')!==s.mode||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
+  if(!order||order.stripeSessionId!==id||(order.billingMode??'payment')!==s.mode||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||(order.billingMode==='subscription'&&(order.subtotal!==s.amount_subtotal||order.taxAmount!==s.total_details?.amount_tax))||order.currency!=='cad')throw Error('ORDER_MISMATCH');
   if(prior.exists){if(prior.get('payment.checkoutSessionId')!==id)throw Error('ORDER_MISMATCH');return;}
   tx.update(ref,{status:'paid_test',...(subscriptionId?{stripeSubscriptionId:subscriptionId}:{}),paidAt:FieldValue.serverTimestamp()});
   tx.create(out,{schemaVersion:1,requestId:orderId,environment:'sandbox',status:'PENDING_PROVISIONER',customer:order.profile,applicationIds:order.applicationIds,payment:{provider:'stripe',status:'paid',livemode:false,checkoutSessionId:id,paymentIntentId,eventId:event.id,amount:order.amount,currency:'cad'},createdAt:FieldValue.serverTimestamp()});
@@ -85,7 +86,7 @@ export async function GET(req:NextRequest,{params}:Ctx){
  const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
  const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),applicationIds:d.get('applicationIds')??[],amount:d.get('amount'),currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
- return result({email:u.email,profile:p.data()??null,items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
+ return result({email:u.email,profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
 const syncOrigin='https://controlde.nixinx.org';
@@ -188,26 +189,30 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const items=await catalog();
   const selected=items.filter(i=>body.applicationIds.includes(i.id));
   if(selected.length!==body.applicationIds.length)return fail('CATALOG_UNAVAILABLE',503);
-  const amount=selected.reduce((sum,item)=>sum+item.amount,0);
+  const subtotal=selected.reduce((sum,item)=>sum+item.amount,0);
   const applicationIds=selected.map(i=>i.id).sort();
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  const taxPolicy=commercialTaxPolicy(profile);if(!taxPolicy)return fail('TAX_JURISDICTION_NOT_CONFIGURED',409);
+  const taxRateId=await ontarioTaxRate(stripe);
   const customer=await billingCustomer(db,u.uid,profile,stripe);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
   const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists)return old.data()!;
    const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
    if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
    const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
-   const value={billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,amount,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
+   const value={billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,taxRateId,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
   if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
-  if(order.billingMode!=='subscription'||order.amount!==amount||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
+  if(order.billingMode!=='subscription'||order.subtotal!==subtotal||order.taxRateId!==taxRateId||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
   const form=new URLSearchParams({mode:'subscription',customer,'subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
-  selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');});
+  selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');form.set('line_items['+index+'][tax_rates][0]',taxRateId);});
   const s=await stripe('checkout/sessions',form,'nx-sandbox-'+orderId);
   if(!/^cs_test_/.test(s.id)||typeof s.url!=='string')return fail('INVALID_CHECKOUT',503);
-  await ref.update({stripeSessionId:s.id});return result({url:s.url});
+  const taxAmount=s.total_details?.amount_tax;
+  if(s.amount_subtotal!==subtotal||!Number.isSafeInteger(taxAmount)||taxAmount<0||s.amount_total!==subtotal+taxAmount||s.currency!=='cad'||Math.abs(taxAmount-Math.round(subtotal*13/100))>selected.length)return fail('TAX_AMOUNT_MISMATCH',503);
+  await ref.update({stripeSessionId:s.id,amount:s.amount_total,taxAmount});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
  }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
