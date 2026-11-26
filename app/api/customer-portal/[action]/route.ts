@@ -26,7 +26,7 @@ async function firebase(action:string,body:object){
  if(!res.ok)throw Error('AUTH_FAILED');return res.json();
 }
 async function stripe(path:string,form?:URLSearchParams,idempotency?:string){
- const key=process.env.STRIPE_SANDBOX_SECRET_KEY;if(!key?.startsWith('sk_test_'))throw Error('SANDBOX_NOT_CONFIGURED');
+ const key=process.env.STRIPE_COMMERCIAL_SECRET_KEY;if(!key?.startsWith('rk_test_'))throw Error('SANDBOX_NOT_CONFIGURED');
  const headers:Record<string,string>={Authorization:'Bearer '+key,'Stripe-Version':'2024-06-20'};
  if(form)headers['Content-Type']='application/x-www-form-urlencoded';if(idempotency)headers['Idempotency-Key']=idempotency;
  const res=await fetch('https://api.stripe.com/v1/'+path,{method:form?'POST':'GET',headers,body:form,cache:'no-store',signal:AbortSignal.timeout(15000)});

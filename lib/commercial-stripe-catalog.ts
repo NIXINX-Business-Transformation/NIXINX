@@ -20,8 +20,8 @@ export async function readPublished(token?:string):Promise<Published[]>{
  });
 }
 async function request(path:string,form?:URLSearchParams,key?:string){
- const secret=process.env.STRIPE_SANDBOX_SECRET_KEY;
- if(!secret?.startsWith("sk_test_"))throw Error("SANDBOX_NOT_CONFIGURED");
+ const secret=process.env.STRIPE_COMMERCIAL_SECRET_KEY;
+ if(!secret?.startsWith("rk_test_"))throw Error("SANDBOX_NOT_CONFIGURED");
  const headers:Record<string,string>={Authorization:"Bearer "+secret,"Stripe-Version":"2024-06-20"};
  if(form)headers["Content-Type"]="application/x-www-form-urlencoded";
  if(key)headers["Idempotency-Key"]=key;
