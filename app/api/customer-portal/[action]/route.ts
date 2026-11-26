@@ -6,6 +6,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
+import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, canadaTaxRates } from '@/lib/commercial-tax';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -135,6 +136,11 @@ export async function POST(req:NextRequest,{params}:Ctx){
    if(body[key]===undefined)continue;
    if(typeof body[key]!=='string'||body[key].trim().length>max)return fail('INVALID_PROFILE');
    details[key]=body[key].trim();
+  }
+  if(details.country!==undefined||details.province!==undefined){
+   const country=countryCode(details.country),province=provinceCode(details.province);
+   if(!country||!province)return fail('INVALID_BILLING_JURISDICTION');
+   details.country=country;details.province=province;
   }
   if(details.contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.contactEmail))return fail('INVALID_CONTACT_EMAIL');
   if(body.avatar!==undefined){
