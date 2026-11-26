@@ -102,7 +102,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   if(!(await catalog()).length)return fail('CATALOG_UNAVAILABLE',503);
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':corporate').digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
-  const order=await db.runTransaction(async tx=>{const old=await tx.get(ref);if(old.exists)return old.data()!;
+  const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists)return old.data()!;
    const value={uid:u.uid,profile,applicationIds:['corporate'],amount:50,currency:'cad',status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
