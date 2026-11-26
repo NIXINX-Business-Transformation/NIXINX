@@ -4,6 +4,7 @@ import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
+import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -29,7 +30,7 @@ async function stripe(path:string,form?:URLSearchParams,idempotency?:string){
  const headers:Record<string,string>={Authorization:'Bearer '+key,'Stripe-Version':'2024-06-20'};
  if(form)headers['Content-Type']='application/x-www-form-urlencoded';if(idempotency)headers['Idempotency-Key']=idempotency;
  const res=await fetch('https://api.stripe.com/v1/'+path,{method:form?'POST':'GET',headers,body:form,cache:'no-store',signal:AbortSignal.timeout(15000)});
- if(!res.ok)throw Error('STRIPE_UNAVAILABLE');const obj=await res.json();if(obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
+ if(!res.ok)throw Error('STRIPE_UNAVAILABLE');const obj=await res.json();if(obj.object==='list'?(!Array.isArray(obj.data)||obj.data.some((v:{livemode?:boolean})=>v.livemode!==false)):obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
 }
 const catalog=commercialCatalog;
 function signature(raw:string,header:string){
@@ -51,7 +52,7 @@ async function webhook(req:NextRequest){
  const {db}=service(),ref=db.collection('commercial_orders').doc(orderId),out=db.collection('commercial_provisioning_outbox').doc(orderId);
  await db.runTransaction(async tx=>{
   const [old,prior]=await Promise.all([tx.get(ref),tx.get(out)]);const order=old.data();
-  if(!order||order.stripeSessionId!==id||s.metadata?.orderId!==orderId||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
+  if(!order||order.stripeSessionId!==id||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
   if(prior.exists){if(prior.get('payment.checkoutSessionId')!==id)throw Error('ORDER_MISMATCH');return;}
   tx.update(ref,{status:'paid_test',paidAt:FieldValue.serverTimestamp()});
   tx.create(out,{schemaVersion:1,requestId:orderId,environment:'sandbox',status:'PENDING_PROVISIONER',customer:order.profile,applicationIds:order.applicationIds,payment:{provider:'stripe',status:'paid',livemode:false,checkoutSessionId:id,paymentIntentId:s.payment_intent,eventId:event.id,amount:order.amount,currency:'cad'},createdAt:FieldValue.serverTimestamp()});
@@ -61,8 +62,10 @@ async function webhook(req:NextRequest){
 type Ctx={params:Promise<{action:string}>};
 export async function GET(req:NextRequest,{params}:Ctx){
  try{if((await params).action!=='account')return fail('NOT_FOUND',404);const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
- const {db}=service();const [p,orders,items]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(10).get(),catalog()]);
- return result({email:u.email,profile:p.data()??null,items:items.map(({priceId,...item})=>item),orders:orders.docs.map(d=>({id:d.id,status:d.get('status')}))});
+ const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
+ if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
+ const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),applicationIds:d.get('applicationIds')??[],amount:d.get('amount'),currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
+ return result({email:u.email,profile:p.data()??null,items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
 const syncOrigin='https://controlde.nixinx.org';
@@ -88,7 +91,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
  try{
  const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);
  if(req.headers.get('origin')!==origin()||req.nextUrl.origin!==origin())return fail('INVALID_ORIGIN',403);
- const raw=await req.text();if(raw.length>10000)return fail('REQUEST_TOO_LARGE',413);const body=JSON.parse(raw||'{}');
+ const raw=await req.text();if(raw.length>(action==='profile'?150000:10000))return fail('REQUEST_TOO_LARGE',413);const body=JSON.parse(raw||'{}');
  if(action==='register'||action==='login'||action==='reset'){
   const email=str(body.email).toLowerCase(),password=typeof body.password==='string'?body.password:'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return fail('INVALID_EMAIL');
@@ -105,12 +108,47 @@ export async function POST(req:NextRequest,{params}:Ctx){
  if(action==='profile'){
   const name=str(body.name),company=str(body.company),acronym=str(body.acronym);
   if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym))return fail('INVALID_PROFILE');
+  const details:Record<string,string>={};
+  const limits:Record<string,number>={legalName:150,contactEmail:254,phone:40,address1:150,address2:150,city:100,province:100,postalCode:24,country:80,taxType:60,taxId:80};
+  for(const [key,max] of Object.entries(limits)){
+   if(body[key]===undefined)continue;
+   if(typeof body[key]!=='string'||body[key].trim().length>max)return fail('INVALID_PROFILE');
+   details[key]=body[key].trim();
+  }
+  if(details.contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.contactEmail))return fail('INVALID_CONTACT_EMAIL');
+  if(body.avatar!==undefined){
+   if(typeof body.avatar!=='string'||body.avatar.length>120000||(body.avatar!==''&&!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(body.avatar)))return fail('INVALID_AVATAR');
+   details.avatar=body.avatar;
+  }
   const claim=db.collection('commercial_acronyms').doc(acronym);
   await db.runTransaction(async tx=>{const [old,c]=await Promise.all([tx.get(p),tx.get(claim)]);
    if(old.exists&&old.get('acronym')!==acronym)throw Error('ACRONYM_IMMUTABLE');
    if(c.exists&&c.get('uid')!==u.uid)throw Error('ACRONYM_TAKEN');
-   if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{name,company,acronym,email:u.email},{merge:true});
+   if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{...details,name,company,acronym,email:u.email},{merge:true});
   });return result({ok:true});
+ }
+ if(action==='billing-portal'||action==='subscriptions'){
+  const locale=str(body.locale);if(!['en','es','fr'].includes(locale))return fail('INVALID_LOCALE');
+  const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  if(action==='subscriptions'){
+   const bound=(await db.collection('commercial_billing_customers').doc(u.uid).get()).data();
+   if(!bound?.stripeCustomerId)return result({subscriptions:[]});
+   const customer=await billingCustomer(db,u.uid,profile,stripe);
+   return result({subscriptions:await billingSubscriptions(stripe,customer)});
+  }
+  const customer=await billingCustomer(db,u.uid,profile,stripe);
+  return result({url:await hostedBilling(stripe,customer,origin()+'/'+locale+'/account?section=billing')});
+ }
+ if(action==='support'){
+  const kind=str(body.kind),subject=str(body.subject),description=str(body.description),appId=str(body.appId);
+  if(!['support','claim','cancellation'].includes(kind)||subject.length<3||subject.length>160||description.length<5||description.length>2000)return fail('INVALID_REQUEST');
+  if(kind==='cancellation'){
+   const orders=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
+   if(orders.size>500||!orders.docs.some(d=>d.get('status')==='paid_test'&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').includes(appId)))return fail('APPLICATION_NOT_CONTRACTED',409);
+  }
+  const ref=db.collection('commercial_support_requests').doc();
+  await ref.create({uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null,status:'OPEN',createdAt:FieldValue.serverTimestamp()});
+  return result({id:ref.id},201);
  }
  if(action==='checkout'){
   const locale=str(body.locale);if(!['en','es','fr'].includes(locale)||!Array.isArray(body.applicationIds)||body.applicationIds.length<1||body.applicationIds.length>50||new Set(body.applicationIds).size!==body.applicationIds.length||body.applicationIds.some((id:unknown)=>typeof id!=='string'||!/^[a-z][a-z0-9-]{1,38}$/.test(id)))return fail('INVALID_SELECTION');
@@ -120,20 +158,24 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const amount=selected.reduce((sum,item)=>sum+item.amount,0);
   const applicationIds=selected.map(i=>i.id).sort();
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  const customer=await billingCustomer(db,u.uid,profile,stripe);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
   const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists)return old.data()!;
-   const value={uid:u.uid,profile,applicationIds,amount,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
+   const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
+   if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
+   const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
+   const value={uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,amount,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
   if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
   if(order.amount!==amount||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
-  const form=new URLSearchParams({mode:'payment',customer_email:u.email!,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
+  const form=new URLSearchParams({mode:'payment',customer,'invoice_creation[enabled]':'true',client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
   selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');});
   const s=await stripe('checkout/sessions',form,'nx-sandbox-'+orderId);
   if(!/^cs_test_/.test(s.id)||typeof s.url!=='string')return fail('INVALID_CHECKOUT',503);
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH'].includes(c))return fail(c,409);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
