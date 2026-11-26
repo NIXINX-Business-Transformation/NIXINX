@@ -5,9 +5,9 @@ import ts from "typescript";
 const compile=(p)=>ts.transpileModule(fs.readFileSync(new URL(p,import.meta.url),"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
 const url=(s)=>"data:text/javascript;base64,"+Buffer.from(s).toString("base64");
 const geo=url(compile("../lib/commercial-geography.ts"));
-const {validateCommercialProfile,normalizeCanadianPostal}=await import(url(compile("../lib/commercial-profile-validation.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
+const {validateCommercialProfile,normalizeCanadianPostal,legalBillingName}=await import(url(compile("../lib/commercial-profile-validation.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
 const {availableCommercialItems,resumableCommercialOrder,openCheckoutUrl}=await import(url(compile("../lib/commercial-app-eligibility.ts")));
-const valid={name:"José",company:"Échantillon Inc.",country:"CA",province:"ON",address1:"100 Main St",city:"Windsor",postalCode:"n9a1a1",phone:"+1 (519) 555-0100",contactEmail:"test@example.com"};
+const valid={name:"José",company:"Échantillon Inc.",legalName:"123456 Ontario Inc.",country:"CA",province:"ON",address1:"100 Main St",city:"Windsor",postalCode:"n9a1a1",phone:"+1 (519) 555-0100",contactEmail:"test@example.com"};
 test("valid Canadian profile, local postal normalization and optional fields",()=>{assert.deepEqual(validateCommercialProfile(valid,true),{});assert.equal(normalizeCanadianPostal("n9a1a1"),"N9A 1A1");assert.deepEqual(validateCommercialProfile({...valid,city:"Trois-Rivières",phone:""},true),{});});
 test("reject invalid fields separately and require billing address",()=>{const e=validateCommercialProfile({...valid,phone:"not a phone",city:"3513214354",postalCode:"garbage",address1:"",contactEmail:"x",taxType:"GST"},true);for(const k of ["phone","city","postalCode","address1","contactEmail","taxId"])assert.ok(e[k],k);assert.equal(normalizeCanadianPostal("D9D 1D1"),null);assert.ok(validateCommercialProfile({...valid,city:"Windsor\u200b"},true).city);});
 test("paid and pending apps never reappear in available choices",()=>{const apps=[{id:"corporate"},{id:"initiatives"},{id:"supply"}];assert.deepEqual(availableCommercialItems(apps,[{status:"paid_test",applicationIds:["corporate"]},{status:"pending_test",applicationIds:["initiatives"]}]),[{id:"supply"}]);assert.deepEqual(availableCommercialItems(apps,[{status:"paid_test",applicationIds:["corporate","initiatives","supply"]}]),[]);});
@@ -20,4 +20,18 @@ test("resume only the owner's existing open Sandbox session, never a paid or mis
  for(const changes of [{uid:"other"},{status:"paid_test"},{stripeSessionId:null},{terms:{version:"old",acceptedBy:uid}},{terms:{version,acceptedBy:"other"}},{stripeSessionId:"cs_live_fixture"}])assert.equal(resumableCommercialOrder({...order,...changes},uid,version),false);
  assert.equal(openCheckoutUrl(session,order,orderId),session.url);
  for(const changes of [{status:"expired"},{status:"complete"},{payment_status:"paid"},{livemode:true},{customer:"cus_other"},{amount_subtotal:51},{client_reference_id:"other"},{metadata:{}},{url:"https://checkout.stripe.com.evil.example/c/pay"},{automatic_tax:{enabled:false}}])assert.equal(openCheckoutUrl({...session,...changes},order,orderId),null);
+});
+
+test("both legal and operating names required; may be identical; personal name must contain a letter",()=>{
+ assert.equal(validateCommercialProfile({...valid,legalName:""},true).legalName,"required");
+ assert.equal(validateCommercialProfile({...valid,legalName:undefined},true).legalName,"required");
+ assert.equal(validateCommercialProfile({...valid,company:""},true).company,"required");
+ assert.equal(validateCommercialProfile({...valid,name:"984983725098"},true).name,"format");
+ assert.equal(validateCommercialProfile({...valid,name:"---"},true).name,"format");
+ assert.deepEqual(validateCommercialProfile({...valid,legalName:valid.company},true),{});
+ assert.deepEqual(validateCommercialProfile({...valid,name:"Élodie 李",legalName:"123456 Ontario Inc.",company:"Échantillon & Fils"},true),{});
+ assert.equal(legalBillingName(" 123456 Ontario Inc. "),"123456 Ontario Inc.");
+ assert.equal(legalBillingName(undefined),null);
+ assert.equal(legalBillingName(""),null);
+ assert.equal(legalBillingName("Test\u200b Inc."),null);
 });
