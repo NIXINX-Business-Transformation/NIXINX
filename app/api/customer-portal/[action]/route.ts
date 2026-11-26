@@ -8,6 +8,7 @@ import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/cust
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
+import { CONSENT_VERSION } from '@/lib/commercial-consents';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -87,7 +88,7 @@ export async function GET(req:NextRequest,{params}:Ctx){
  const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
  const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),billingMode:d.get('billingMode')??'payment',subscriptionId:d.get('stripeSubscriptionId')??null,applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
- return result({email:u.email,profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
+ return result({email:u.email,communication:{email:p.get('communication.email')===true,sms:p.get('communication.sms')===true},profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
 const syncOrigin='https://controlde.nixinx.org';
@@ -136,6 +137,19 @@ export async function POST(req:NextRequest,{params}:Ctx){
  if(action==='logout'){const r=result({ok:true});r.cookies.set(cookie,'',{httpOnly:true,secure:true,sameSite:'lax',path:'/',maxAge:0});return r;}
  const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
  const {db}=service(),p=db.collection('commercial_profiles').doc(u.uid);
+ if(action==='communication-preferences'){
+  if(typeof body.email!=='boolean'||typeof body.sms!=='boolean'||body.version!==CONSENT_VERSION||!['en','es','fr'].includes(body.locale))return fail('INVALID_CONSENT');
+  const ref=p.collection('communication_history').doc();
+  await db.runTransaction(async tx=>{
+   const old=await tx.get(p);if(!old.exists)throw Error('PROFILE_REQUIRED');
+   const before={email:old.get('communication.email')===true,sms:old.get('communication.sms')===true};
+   if(before.email===body.email&&before.sms===body.sms)return;
+   if(body.sms&&!str(old.get('phone')))throw Error('PHONE_REQUIRED');
+   const current={email:body.email,sms:body.sms,version:CONSENT_VERSION,locale:body.locale,updatedAt:FieldValue.serverTimestamp()};
+   tx.update(p,{communication:current});
+   tx.create(ref,{uid:u.uid,before,after:{email:body.email,sms:body.sms},version:CONSENT_VERSION,locale:body.locale,createdAt:FieldValue.serverTimestamp()});
+  });return result({ok:true});
+ }
  if(action==='profile'){
   const name=str(body.name),company=str(body.company),acronym=str(body.acronym);
   if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym))return fail('INVALID_PROFILE');
@@ -209,13 +223,14 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
   const taxPolicy=commercialTaxPolicy(profile);if(!taxPolicy)return fail('TAX_JURISDICTION_NOT_CONFIGURED',409);
   if(action==='tax-quote')return result(await quoteTax(stripe,taxPolicy,selected));
+  if(body.termsAccepted!==true||body.termsVersion!==CONSENT_VERSION)return fail('TERMS_REQUIRED',409);
   const customer=await billingCustomer(db,u.uid,profile,stripe);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
-  const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists)return old.data()!;
+  const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const old=await tx.get(ref);if(old.exists){const existing=old.data()!;if(existing.status==='pending_test'&&existing.terms?.version!==CONSENT_VERSION)throw Error('ORDER_REQUIRES_REVIEW');return existing;}
    const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
    if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
    const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
-   const value={billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
+   const value={terms:{version:CONSENT_VERSION,locale,acceptedBy:u.uid,acceptedAt:FieldValue.serverTimestamp()},billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
   if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
@@ -229,5 +244,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
