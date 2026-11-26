@@ -5,6 +5,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
+import { recordBillingEvent } from '@/lib/commercial-billing-events';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -43,7 +44,10 @@ function signature(raw:string,header:string){
 async function webhook(req:NextRequest){
  const raw=await req.text();if(raw.length>1000000||!signature(raw,req.headers.get('stripe-signature')||''))return fail('INVALID_SIGNATURE');
  const event=JSON.parse(raw);if(event.livemode!==false)return fail('LIVE_REJECTED');
- if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type))return result({received:true});
+ if(!['checkout.session.completed','checkout.session.async_payment_succeeded'].includes(event.type)){
+  await recordBillingEvent(service().db,event,stripe);
+  return result({received:true});
+ }
  const id=str(event.data?.object?.id);if(!/^cs_test_[A-Za-z0-9_]+$/.test(id))return fail('INVALID_SESSION');
  const s=await stripe('checkout/sessions/'+encodeURIComponent(id));
  if(s.payment_status!=='paid')return result({received:true});
