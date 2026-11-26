@@ -1,37 +1,17 @@
 import "server-only";
 import {countryCode,provinceCode} from "./commercial-geography";
 type StripeCall=(path:string,form?:URLSearchParams,key?:string)=>Promise<any>;
-type Rate={label:string;percentage:number};
-const gst:Rate={label:"GST",percentage:5};
-const hst=(percentage:number):Rate=>({label:"HST",percentage});
-const jurisdictions:Record<string,{names:string[];rates:Rate[]}>={
- AB:{names:["alberta"],rates:[gst]},BC:{names:["british columbia","colombie-britannique"],rates:[gst,{label:"PST",percentage:7}]},
- MB:{names:["manitoba"],rates:[gst,{label:"RST",percentage:7}]},NB:{names:["new brunswick","nouveau-brunswick"],rates:[hst(15)]},
- NL:{names:["newfoundland and labrador","terre-neuve-et-labrador"],rates:[hst(15)]},NS:{names:["nova scotia","nouvelle-ecosse"],rates:[hst(14)]},
- ON:{names:["ontario"],rates:[hst(13)]},PE:{names:["prince edward island","ile-du-prince-edouard"],rates:[hst(15)]},
- QC:{names:["quebec"],rates:[gst,{label:"QST",percentage:9.975}]},SK:{names:["saskatchewan"],rates:[gst,{label:"PST",percentage:6}]},
- NT:{names:["northwest territories","territoires du nord-ouest"],rates:[gst]},NU:{names:["nunavut"],rates:[gst]},YT:{names:["yukon"],rates:[gst]}
-};
-// Standard taxable single-jurisdiction SaaS simulation only; not a live registration decision.
 export function commercialTaxPolicy(profile:Record<string,unknown>|null){
- if(countryCode(profile?.country)!=="CA")return null;
- const code=provinceCode(profile?.province);
- // Provincial independent taxes require a reviewed collection obligation; do not collect by default.
- const rates=code?jurisdictions[code].rates.filter(r=>r.label==="GST"||r.label==="HST"):[];
- return code?{country:"CA",province:code,rates,version:"CA-2026-11-26-federal-only"}:null;
+ const country=countryCode(profile?.country),province=provinceCode(profile?.province);
+ const postal=String(profile?.postalCode??"").trim().toUpperCase().replace(/\s/g,"");
+ const city=String(profile?.city??"").trim(),line1=String(profile?.address1??"").trim();
+ return country==="CA"&&province&&/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(postal)&&city&&line1?{country,province,postal,city,line1}:null;
 }
-export async function canadaTaxRates(stripe:StripeCall,policy:NonNullable<ReturnType<typeof commercialTaxPolicy>>):Promise<string[]>{
- const page=await stripe("tax_rates?active=true&limit=100");
- if(page.has_more)throw Error("TAX_CONFIGURATION_REVIEW");
- const ids:string[]=[];
- for(const tax of policy.rates){
-  const owner=policy.province==="ON"&&tax.label==="HST"?"nixinx-commercial-ontario-hst-13-v1":"nixinx-commercial-ca-"+policy.province.toLowerCase()+"-"+tax.label.toLowerCase()+"-"+tax.percentage+"-v1";
-  const matches=page.data.filter((v:any)=>v.metadata?.nixinx_owner===owner);
-  const valid=(v:any)=>v.active===true&&v.livemode===false&&v.inclusive===false&&v.percentage===tax.percentage&&v.country==="CA"&&v.state===policy.province&&v.display_name===tax.label&&v.metadata?.nixinx_owner===owner&&/^txr_[A-Za-z0-9]+$/.test(v.id);
-  if(matches.length>1||matches.some((v:any)=>!valid(v)))throw Error("TAX_CONFIGURATION_REVIEW");
-  const rate=matches[0]??await stripe("tax_rates",new URLSearchParams({display_name:tax.label,percentage:String(tax.percentage),inclusive:"false",country:"CA",state:policy.province,jurisdiction:policy.province+", Canada","metadata[nixinx_owner]":owner}),owner);
-  if(!valid(rate))throw Error("TAX_CONFIGURATION_REVIEW");
-  ids.push(rate.id);
- }
- return ids;
+export async function quoteTax(stripe:StripeCall,policy:NonNullable<ReturnType<typeof commercialTaxPolicy>>,items:{id:string;amount:number;priceId:string}[]){
+ const form=new URLSearchParams({currency:"cad","customer_details[address][country]":policy.country,"customer_details[address][state]":policy.province,"customer_details[address][postal_code]":policy.postal,"customer_details[address][city]":policy.city,"customer_details[address][line1]":policy.line1,"customer_details[address_source]":"billing"});
+ items.forEach((item,i)=>{form.set("line_items["+i+"][amount]",String(item.amount));form.set("line_items["+i+"][reference]",item.id);form.set("line_items["+i+"][tax_behavior]","exclusive");form.set("line_items["+i+"][tax_code]","txcd_10103001");});
+ const q=await stripe("tax/calculations",form);
+ const subtotal=items.reduce((n,i)=>n+i.amount,0);
+ if(q.currency!=="cad"||!Number.isSafeInteger(q.tax_amount_exclusive)||q.tax_amount_exclusive<0||q.amount_total!==subtotal+q.tax_amount_exclusive||q.tax_amount_inclusive!==0)throw Error("TAX_AMOUNT_MISMATCH");
+ return {subtotal,tax:q.tax_amount_exclusive,total:q.amount_total,lines:(q.tax_breakdown??[]).map((r:any)=>({label:r.tax_rate_details?.tax_type??"tax",percentage:r.tax_rate_details?.percentage_decimal??null,amount:r.amount}))};
 }
