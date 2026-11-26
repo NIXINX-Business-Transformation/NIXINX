@@ -48,14 +48,22 @@ async function webhook(req:NextRequest){
  const s=await stripe('checkout/sessions/'+encodeURIComponent(id));
  if(s.payment_status!=='paid')return result({received:true});
  const orderId=str(s.client_reference_id);
- if(!/^[a-f0-9]{64}$/.test(orderId)||s.mode!=='payment'||s.status!=='complete'||!Number.isSafeInteger(s.amount_total)||s.amount_total<50||s.currency!=='cad'||typeof s.payment_intent!=='string')return fail('PAYMENT_MISMATCH',409);
+ if(!/^[a-f0-9]{64}$/.test(orderId)||!['payment','subscription'].includes(s.mode)||s.status!=='complete'||!Number.isSafeInteger(s.amount_total)||s.amount_total<50||s.currency!=='cad'||(s.mode==='payment'&&typeof s.payment_intent!=='string')||(s.mode==='subscription'&&typeof s.subscription!=='string'))return fail('PAYMENT_MISMATCH',409);
+ let subscriptionId:string|null=null,paymentIntentId=s.payment_intent;
+ if(s.mode==='subscription'){
+  const sub=await stripe('subscriptions/'+encodeURIComponent(s.subscription));
+  if(sub.customer!==s.customer||sub.metadata?.orderId!==orderId||sub.status!=='active'||typeof sub.latest_invoice!=='string')return fail('PAYMENT_MISMATCH',409);
+  const invoice=await stripe('invoices/'+encodeURIComponent(sub.latest_invoice));
+  if(invoice.status!=='paid'||invoice.billing_reason!=='subscription_create'||invoice.customer!==s.customer||invoice.subscription!==sub.id||invoice.amount_paid!==s.amount_total||invoice.currency!=='cad'||typeof invoice.payment_intent!=='string')return fail('PAYMENT_MISMATCH',409);
+  subscriptionId=sub.id;paymentIntentId=invoice.payment_intent;
+ }
  const {db}=service(),ref=db.collection('commercial_orders').doc(orderId),out=db.collection('commercial_provisioning_outbox').doc(orderId);
  await db.runTransaction(async tx=>{
   const [old,prior]=await Promise.all([tx.get(ref),tx.get(out)]);const order=old.data();
-  if(!order||order.stripeSessionId!==id||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
+  if(!order||order.stripeSessionId!==id||(order.billingMode??'payment')!==s.mode||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
   if(prior.exists){if(prior.get('payment.checkoutSessionId')!==id)throw Error('ORDER_MISMATCH');return;}
-  tx.update(ref,{status:'paid_test',paidAt:FieldValue.serverTimestamp()});
-  tx.create(out,{schemaVersion:1,requestId:orderId,environment:'sandbox',status:'PENDING_PROVISIONER',customer:order.profile,applicationIds:order.applicationIds,payment:{provider:'stripe',status:'paid',livemode:false,checkoutSessionId:id,paymentIntentId:s.payment_intent,eventId:event.id,amount:order.amount,currency:'cad'},createdAt:FieldValue.serverTimestamp()});
+  tx.update(ref,{status:'paid_test',...(subscriptionId?{stripeSubscriptionId:subscriptionId}:{}),paidAt:FieldValue.serverTimestamp()});
+  tx.create(out,{schemaVersion:1,requestId:orderId,environment:'sandbox',status:'PENDING_PROVISIONER',customer:order.profile,applicationIds:order.applicationIds,payment:{provider:'stripe',status:'paid',livemode:false,checkoutSessionId:id,paymentIntentId,eventId:event.id,amount:order.amount,currency:'cad'},createdAt:FieldValue.serverTimestamp()});
  });
  return result({received:true});
 }
@@ -164,13 +172,13 @@ export async function POST(req:NextRequest,{params}:Ctx){
    const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
    if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
    const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
-   const value={uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,amount,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
+   const value={billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,amount,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
   if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
-  if(order.amount!==amount||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
+  if(order.billingMode!=='subscription'||order.amount!==amount||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
-  const form=new URLSearchParams({mode:'payment',customer,'invoice_creation[enabled]':'true',client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
+  const form=new URLSearchParams({mode:'subscription',customer,'subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned',cancel_url:base+'?checkout=cancelled'});
   selected.forEach((item,index)=>{form.set('line_items['+index+'][price]',item.priceId);form.set('line_items['+index+'][quantity]','1');});
   const s=await stripe('checkout/sessions',form,'nx-sandbox-'+orderId);
   if(!/^cs_test_/.test(s.id)||typeof s.url!=='string')return fail('INVALID_CHECKOUT',503);
