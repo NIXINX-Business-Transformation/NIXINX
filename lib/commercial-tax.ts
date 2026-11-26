@@ -1,4 +1,5 @@
 import "server-only";
+import {countryCode,provinceCode} from "./commercial-geography";
 type StripeCall=(path:string,form?:URLSearchParams,key?:string)=>Promise<any>;
 type Rate={label:string;percentage:number};
 const gst:Rate={label:"GST",percentage:5};
@@ -11,13 +12,13 @@ const jurisdictions:Record<string,{names:string[];rates:Rate[]}>={
  QC:{names:["quebec"],rates:[gst,{label:"QST",percentage:9.975}]},SK:{names:["saskatchewan"],rates:[gst,{label:"PST",percentage:6}]},
  NT:{names:["northwest territories","territoires du nord-ouest"],rates:[gst]},NU:{names:["nunavut"],rates:[gst]},YT:{names:["yukon"],rates:[gst]}
 };
-const normalize=(v:unknown)=>String(v??"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 // Standard taxable single-jurisdiction SaaS simulation only; not a live registration decision.
 export function commercialTaxPolicy(profile:Record<string,unknown>|null){
- if(!["ca","canada"].includes(normalize(profile?.country)))return null;
- const province=normalize(profile?.province);
- const code=Object.keys(jurisdictions).find(k=>k.toLowerCase()===province||jurisdictions[k].names.includes(province));
- return code?{country:"CA",province:code,rates:jurisdictions[code].rates,version:"CA-2026-11-26"}:null;
+ if(countryCode(profile?.country)!=="CA")return null;
+ const code=provinceCode(profile?.province);
+ // Provincial independent taxes require a reviewed collection obligation; do not collect by default.
+ const rates=code?jurisdictions[code].rates.filter(r=>r.label==="GST"||r.label==="HST"):[];
+ return code?{country:"CA",province:code,rates,version:"CA-2026-11-26-federal-only"}:null;
 }
 export async function canadaTaxRates(stripe:StripeCall,policy:NonNullable<ReturnType<typeof commercialTaxPolicy>>):Promise<string[]>{
  const page=await stripe("tax_rates?active=true&limit=100");
