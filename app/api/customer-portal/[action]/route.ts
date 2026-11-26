@@ -9,6 +9,7 @@ import { recordBillingEvent } from '@/lib/commercial-billing-events';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
+import {validNewOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -197,8 +198,8 @@ export async function POST(req:NextRequest,{params}:Ctx){
   });return result({ok:true});
  }
  if(action==='profile'){
-  const name=str(body.name),company=str(body.company),acronym=str(body.acronym);
-  if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym))return fail('INVALID_PROFILE');
+  const name=str(body.name),company=str(body.company),acronym=typeof body.acronym==='string'?body.acronym:'';
+  if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym)||/[^a-z0-9-]/.test(acronym))return fail('INVALID_PROFILE');
   const details:Record<string,string>={};
   const limits:Record<string,number>={legalName:150,contactEmail:254,phone:40,address1:150,address2:150,city:100,province:100,postalCode:24,country:80,taxType:60,taxId:80};
   for(const [key,max] of Object.entries(limits)){
@@ -219,6 +220,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const claim=db.collection('commercial_acronyms').doc(acronym);
   await db.runTransaction(async tx=>{const [old,c]=await Promise.all([tx.get(p),tx.get(claim)]);
    if(old.exists&&old.get('acronym')!==acronym)throw Error('ACRONYM_IMMUTABLE');
+   if(!old.exists&&!validNewOrganizationAcronym(acronym))throw Error('INVALID_NEW_ACRONYM');
    if(c.exists&&c.get('uid')!==u.uid)throw Error('ACRONYM_TAKEN');
    if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{...details,name,company,acronym,email:u.email},{merge:true});
   });return result({ok:true});
@@ -290,5 +292,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
