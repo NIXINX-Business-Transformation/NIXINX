@@ -6,6 +6,8 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-catalog';
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
+import {validateCommercialProfile,profileLimits,normalizeCanadianPostal} from '@/lib/commercial-profile-validation';
+import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl} from '@/lib/commercial-app-eligibility';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
@@ -209,20 +211,16 @@ export async function POST(req:NextRequest,{params}:Ctx){
  }
  if(action==='profile'){
   const name=str(body.name),company=str(body.company),rawAcronym=typeof body.acronym==='string'?body.acronym:'',acronym=normalizeOrganizationAcronym(rawAcronym);
-  if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym)||/[^a-z0-9-]/.test(acronym))return fail('INVALID_PROFILE');
+  const errors=validateCommercialProfile(body,true);
+  if(Object.keys(errors).length)return result({error:'INVALID_PROFILE',fields:errors},400);
+  if(!slug.test(acronym)||/[^a-z0-9-]/.test(acronym))return fail('INVALID_NEW_ACRONYM');
   const details:Record<string,string>={};
-  const limits:Record<string,number>={legalName:150,contactEmail:254,phone:40,address1:150,address2:150,city:100,province:100,postalCode:24,country:80,taxType:60,taxId:80};
-  for(const [key,max] of Object.entries(limits)){
-   if(body[key]===undefined)continue;
-   if(typeof body[key]!=='string'||body[key].trim().length>max)return fail('INVALID_PROFILE');
-   details[key]=body[key].trim();
+  for(const key of Object.keys(profileLimits)){
+   if(key==='name'||key==='company')continue;
+   if(body[key]!==undefined)details[key]=str(body[key]);
   }
-  if(details.country!==undefined||details.province!==undefined){
-   const country=countryCode(details.country),province=provinceCode(details.province);
-   if(!country||!province)return fail('INVALID_BILLING_JURISDICTION');
-   details.country=country;details.province=province;
-  }
-  if(details.contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.contactEmail))return fail('INVALID_CONTACT_EMAIL');
+  details.country=countryCode(details.country);details.province=provinceCode(details.province);
+  details.postalCode=normalizeCanadianPostal(details.postalCode)||'';
   if(body.avatar!==undefined){
    if(typeof body.avatar!=='string'||body.avatar.length>120000||(body.avatar!==''&&!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(body.avatar)))return fail('INVALID_AVATAR');
    details.avatar=body.avatar;
@@ -271,6 +269,19 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.create({uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null,status:'OPEN',createdAt:FieldValue.serverTimestamp()});
   return result({id:ref.id},201);
  }
+ if(action==='resume-checkout'){
+  const orderId=typeof body.orderId==='string'?body.orderId:'';
+  if(!/^[a-f0-9]{64}$/.test(orderId))return fail('INVALID_ORDER');
+  const order=(await db.collection('commercial_orders').doc(orderId).get()).data();
+  if(!order||order.uid!==u.uid)return fail('ORDER_NOT_FOUND',404);
+  if(!resumableCommercialOrder(order,u.uid,CONSENT_VERSION))return fail('ORDER_REQUIRES_REVIEW',409);
+  // A reserved order is never added to a new cart. Resume only the existing
+  // authenticated Stripe session; missing/expired sessions require reconciliation.
+  const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));
+  const url=openCheckoutUrl(s,order,orderId);
+  if(!url)return fail('ORDER_REQUIRES_REVIEW',409);
+  return result({url});
+ }
  if(action==='checkout'||action==='tax-quote'){
   const locale=str(body.locale);if(!['en','es','fr'].includes(locale)||!Array.isArray(body.applicationIds)||body.applicationIds.length<1||body.applicationIds.length>50||new Set(body.applicationIds).size!==body.applicationIds.length||body.applicationIds.some((id:unknown)=>typeof id!=='string'||!/^[a-z][a-z0-9-]{1,38}$/.test(id)))return fail('INVALID_SELECTION');
   const items=await catalog();
@@ -280,7 +291,13 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const applicationIds=selected.map(i=>i.id).sort();
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
   const taxPolicy=commercialTaxPolicy(profile);if(!taxPolicy)return fail('TAX_JURISDICTION_NOT_CONFIGURED',409);
-  if(action==='tax-quote')return result(await quoteTax(stripe,taxPolicy,selected));
+  if(action==='tax-quote'){
+   const previous=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
+   if(previous.size>500)return fail('BILLING_RECONCILIATION_REQUIRED',409);
+   const reserved=reservedApplicationIds(previous.docs.map(d=>({status:d.get('status'),applicationIds:d.get('applicationIds')})));
+   if(applicationIds.some(id=>reserved.has(id)))return fail('APPLICATION_ALREADY_ORDERED',409);
+   return result(await quoteTax(stripe,taxPolicy,selected));
+  }
   if(body.termsAccepted!==true||body.termsVersion!==CONSENT_VERSION)return fail('TERMS_REQUIRED',409);
   const customer=await billingCustomer(db,u.uid,profile,stripe);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
@@ -291,7 +308,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
    const value={terms:{version:CONSENT_VERSION,locale,acceptedBy:u.uid,acceptedAt:FieldValue.serverTimestamp()},billingMode:'subscription',uid:u.uid,profile:customerSnapshot,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
-  if(order.stripeSessionId){const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));if(s.status==='open'&&s.url)return result({url:s.url});return fail('ORDER_REQUIRES_REVIEW',409);}
+  if(order.stripeSessionId){if(!resumableCommercialOrder(order,u.uid,CONSENT_VERSION))return fail('ORDER_REQUIRES_REVIEW',409);const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));const url=openCheckoutUrl(s,order,orderId);return url?result({url}):fail('ORDER_REQUIRES_REVIEW',409);}
   if(order.billingMode!=='subscription'||order.subtotal!==subtotal||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
   const form=new URLSearchParams({mode:'subscription',customer,'automatic_tax[enabled]':'true',billing_address_collection:'required','customer_update[address]':'auto','subscription_data[metadata][orderId]':orderId,client_reference_id:orderId,'metadata[orderId]':orderId,'payment_method_types[0]':'card',locale,success_url:base+'?checkout=returned&order='+orderId,cancel_url:base+'?checkout=cancelled'});
