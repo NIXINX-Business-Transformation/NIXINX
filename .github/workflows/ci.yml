@@ -13,6 +13,6 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - run: node --test tests/organization-acronym.test.mjs
+      - run: node --test tests/organization-acronym.test.mjs tests/commercial-profile-validation.test.mjs
       - run: npm run typecheck
       - run: npm run build
