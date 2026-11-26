@@ -83,7 +83,7 @@ async function webhook(req:NextRequest){
 }
 type Ctx={params:Promise<{action:string}>};
 export async function GET(req:NextRequest,{params}:Ctx){
- try{if((await params).action!=='account')return fail('NOT_FOUND',404);const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
+ try{const action=(await params).action;if(action==='auth-config'){const key=process.env.CUSTOMER_FIREBASE_WEB_API_KEY,projectId=process.env.FIREBASE_PROJECT_ID;if(!key||projectId!=='nixinx-bt')return fail('NOT_CONFIGURED',503);return result({apiKey:key,projectId,authDomain:projectId+'.firebaseapp.com'});}if(action!=='account')return fail('NOT_FOUND',404);const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
  const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
  const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
@@ -114,6 +114,15 @@ export async function POST(req:NextRequest,{params}:Ctx){
  const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);
  if(req.headers.get('origin')!==origin()||req.nextUrl.origin!==origin())return fail('INVALID_ORIGIN',403);
  const raw=await req.text();if(raw.length>(action==='profile'?150000:10000))return fail('REQUEST_TOO_LARGE',413);const body=JSON.parse(raw||'{}');
+ if(action==='google-login'){
+  const idToken=typeof body.idToken==='string'?body.idToken:'';
+  if(!idToken||idToken.length>8192)return fail('AUTH_FAILED',401);
+  const {auth}=service();
+  const decoded=await auth.verifyIdToken(idToken,true).catch(()=>null);
+  if(!decoded?.email_verified||!decoded.email||decoded.firebase.sign_in_provider!=='google.com'||Math.abs(Date.now()/1000-decoded.auth_time)>300)return fail('AUTH_FAILED',401);
+  const session=await auth.createSessionCookie(idToken,{expiresIn:ttl});
+  const response=result({ok:true});response.cookies.set(cookie,session,{httpOnly:true,secure:true,sameSite:'lax',path:'/',maxAge:ttl/1000});return response;
+ }
  if(action==='register'||action==='login'||action==='reset'){
   const email=str(body.email).toLowerCase(),password=typeof body.password==='string'?body.password:'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)return fail('INVALID_EMAIL');
