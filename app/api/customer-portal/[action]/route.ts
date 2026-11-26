@@ -136,7 +136,8 @@ async function financialLookup(req:NextRequest){
   if(matches.length!==1)return [];
   const applicationIds=matches[0].get('applicationIds');
   if(!Array.isArray(applicationIds)||!applicationIds.length)return [];
-  return [{paymentIntentId:invoice.payment_intent,invoiceNumber:invoice.number??null,applicationIds,amount:invoice.amount_paid,currency:'cad',date:invoice.created*1000}];
+  if(!/^in_[A-Za-z0-9]+$/.test(invoice.id??'')||!Number.isSafeInteger(invoice.amount_paid)||invoice.amount_paid<=0)return [];
+  return [{paymentIntentId:invoice.payment_intent,invoiceId:invoice.id,orderId:matches[0].id,customerId:customer,subscriptionId:invoice.subscription,invoiceNumber:invoice.number??null,applicationIds,amount:invoice.amount_paid,currency:'cad',date:invoice.created*1000}];
  });
  return result({acronym,company:profile.get('company')??null,payments});
 }
