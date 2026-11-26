@@ -188,3 +188,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 }
 @media(max-width:750px){:root{--mobile-nav-height:68px}}
 @media(max-width:360px){.site-header .nav-wrap{padding-left:max(9px,env(safe-area-inset-left,0px));padding-right:max(9px,env(safe-area-inset-right,0px))}}
+
+/* Customer sign-in: always available outside the collapsed navigation. */
+.site-header .nav-login{display:inline-flex;flex:none;align-items:center;justify-content:center;gap:7px;min-height:44px;min-width:44px;padding:0 10px;border:1px solid #83dfc7;border-radius:8px;color:#9cebd7;font-size:13px;font-weight:700;white-space:nowrap;text-decoration:none}
+.site-header .nav-login:hover{background:#83dfc7;color:#102d27}
+.site-header .nav-login:focus-visible{outline:2px solid #fff;outline-offset:3px}
+@media(min-width:1051px) and (max-width:1450px){.site-header .nav-action{display:none}}
+@media(max-width:750px){.site-header .nav-login{padding:0;gap:0}.site-header .nav-login span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}
