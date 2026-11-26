@@ -31,10 +31,11 @@ async function stripe(path:string,form?:URLSearchParams,idempotency?:string){
  if(!res.ok)throw Error('STRIPE_UNAVAILABLE');const obj=await res.json();if(obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
 }
 async function catalog(){
- // Read-only commercial projection; no staff token or access to Control's database.
- const d=(await service().db.collection('commercial_catalog').doc('corporate').get()).data();
- if(!d||d.source!=='nixinx-control'||d.appId!=='corporate'||d.status!=='active'||d.published!==true)return [];
- return [{id:'corporate',name:str(d.name)||'Corporate',amount:50,currency:'cad'}];
+ const res=await fetch('https://controlde.nixinx.org/api/commercial/catalog',{cache:'no-store',signal:AbortSignal.timeout(10000),redirect:'error'});
+ if(!res.ok)throw Error('CATALOG_UNAVAILABLE');
+ const data=await res.json();
+ if(!Array.isArray(data.items))throw Error('CATALOG_UNAVAILABLE');
+ return data.items.filter((d:unknown):d is {id:string;name:string}=>!!d&&typeof d==='object'&&'id' in d&&d.id==='corporate'&&'name' in d&&typeof d.name==='string'&&!!d.name.trim()).slice(0,1).map((d:{id:string;name:string})=>({id:d.id,name:d.name,amount:50,currency:'cad'}));
 }
 function signature(raw:string,header:string){
  const secret=process.env.STRIPE_SANDBOX_WEBHOOK_SECRET;if(!secret?.startsWith('whsec_'))return false;
