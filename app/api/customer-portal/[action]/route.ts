@@ -147,6 +147,19 @@ export async function POST(req:NextRequest,{params}:Ctx){
    if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{...details,name,company,acronym,email:u.email},{merge:true});
   });return result({ok:true});
  }
+ if(action==='notifications'||action==='invoices'){
+  const collection=action==='notifications'?'commercial_notifications':'commercial_invoices';
+  const rows=await db.collection(collection).where('uid','==',u.uid).limit(501).get();
+  if(rows.size>500)return fail('BILLING_HISTORY_LIMIT',409);
+  if(action==='notifications')return result({notifications:rows.docs.map(d=>({id:d.id,type:d.get('type'),read:d.get('read')===true,date:d.get('createdAt')?.toMillis?.()??null})).sort((a,b)=>(b.date??0)-(a.date??0))});
+  return result({invoices:rows.docs.map(d=>({id:d.id,number:d.get('number')??null,status:d.get('status'),amountDue:d.get('amountDue'),amountPaid:d.get('amountPaid'),currency:d.get('currency'),date:Number(d.get('eventCreated')??0)*1000})).sort((a,b)=>b.date-a.date)});
+ }
+ if(action==='notification-read'){
+  const id=str(body.id);if(!/^evt_[A-Za-z0-9_]+$/.test(id))return fail('INVALID_NOTIFICATION');
+  const ref=db.collection('commercial_notifications').doc(id);
+  await db.runTransaction(async tx=>{const n=await tx.get(ref);if(!n.exists||n.get('uid')!==u.uid)throw Error('NOTIFICATION_NOT_FOUND');tx.update(ref,{read:true,readAt:FieldValue.serverTimestamp()});});
+  return result({ok:true});
+ }
  if(action==='billing-portal'||action==='subscriptions'){
   const locale=str(body.locale);if(!['en','es','fr'].includes(locale))return fail('INVALID_LOCALE');
   const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
@@ -197,5 +210,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID'].includes(c))return fail(c,409);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
