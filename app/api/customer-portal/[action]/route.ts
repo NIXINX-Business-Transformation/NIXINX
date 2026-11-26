@@ -9,7 +9,7 @@ import { recordBillingEvent } from '@/lib/commercial-billing-events';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
-import {validNewOrganizationAcronym} from '@/lib/organization-acronym';
+import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
 const cookie='__Host-nx-commercial', ttl=86400000;
@@ -184,6 +184,16 @@ export async function POST(req:NextRequest,{params}:Ctx){
  if(action==='logout'){const r=result({ok:true});r.cookies.set(cookie,'',{httpOnly:true,secure:true,sameSite:'lax',path:'/',maxAge:0});return r;}
  const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
  const {db}=service(),p=db.collection('commercial_profiles').doc(u.uid);
+ if(action==='acronym-availability'){
+  const candidate=typeof body.acronym==='string'?normalizeOrganizationAcronym(body.acronym):'';
+  if(!validNewOrganizationAcronym(candidate))return fail('INVALID_NEW_ACRONYM',400);
+  const status=await db.runTransaction(async tx=>{
+   const [profile,claim]=await Promise.all([tx.get(p),tx.get(db.collection('commercial_acronyms').doc(candidate))]);
+   if(profile.exists)return 'immutable';
+   return claim.exists?'taken':'available';
+  },{readOnly:true});
+  return result({acronym:candidate,status});
+ }
  if(action==='communication-preferences'){
   if(typeof body.email!=='boolean'||typeof body.sms!=='boolean'||body.version!==CONSENT_VERSION||!['en','es','fr'].includes(body.locale))return fail('INVALID_CONSENT');
   const ref=p.collection('communication_history').doc();
@@ -198,7 +208,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   });return result({ok:true});
  }
  if(action==='profile'){
-  const name=str(body.name),company=str(body.company),acronym=typeof body.acronym==='string'?body.acronym:'';
+  const name=str(body.name),company=str(body.company),rawAcronym=typeof body.acronym==='string'?body.acronym:'',acronym=normalizeOrganizationAcronym(rawAcronym);
   if(name.length<2||name.length>100||company.length<2||company.length>150||!slug.test(acronym)||/[^a-z0-9-]/.test(acronym))return fail('INVALID_PROFILE');
   const details:Record<string,string>={};
   const limits:Record<string,number>={legalName:150,contactEmail:254,phone:40,address1:150,address2:150,city:100,province:100,postalCode:24,country:80,taxType:60,taxId:80};
@@ -219,7 +229,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   }
   const claim=db.collection('commercial_acronyms').doc(acronym);
   await db.runTransaction(async tx=>{const [old,c]=await Promise.all([tx.get(p),tx.get(claim)]);
-   if(old.exists&&old.get('acronym')!==acronym)throw Error('ACRONYM_IMMUTABLE');
+   if(old.exists&&old.get('acronym')!==rawAcronym)throw Error('ACRONYM_IMMUTABLE');
    if(!old.exists&&!validNewOrganizationAcronym(acronym))throw Error('INVALID_NEW_ACRONYM');
    if(c.exists&&c.get('uid')!==u.uid)throw Error('ACRONYM_TAKEN');
    if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{...details,name,company,acronym,email:u.email},{merge:true});
