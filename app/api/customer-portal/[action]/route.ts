@@ -118,7 +118,22 @@ async function financialLookup(req:NextRequest){
  if(!gate.ok)return fail('STAFF_REQUIRED',gate.status===401?401:403);
  if((await gate.json()).authorized!==true)return fail('STAFF_REQUIRED',403);
  const raw=await req.text();if(raw.length>2000)return fail('REQUEST_TOO_LARGE',413);
- const b=JSON.parse(raw),acronym=str(b.acronym);
+ const b=JSON.parse(raw);
+ // Read-only directory from the canonical acronym claims and their owning profiles.
+ // Never use Control tenant records as substitutes for commercial identities.
+ if(b.directory===true){
+  if(Object.keys(b).some(k=>!['directory','cursor'].includes(k))||(b.cursor!==undefined&&(typeof b.cursor!=='string'||!slug.test(b.cursor))))return fail('INVALID_DIRECTORY_REQUEST');
+  const {db}=service();
+  let query=db.collection('commercial_acronyms').orderBy('__name__');
+  if(b.cursor)query=query.startAfter(b.cursor);
+  const page=await query.limit(101).get(),claims=page.docs.slice(0,100);
+  const identities=claims.map(d=>({acronym:d.id,uid:d.get('uid')}));
+  if(identities.some(x=>!slug.test(x.acronym)||typeof x.uid!=='string'||!x.uid||x.uid.includes('/')))return fail('BILLING_RECONCILIATION_REQUIRED',409);
+  const profiles=identities.length?await db.getAll(...identities.map(x=>db.collection('commercial_profiles').doc(x.uid))):[];
+  if(profiles.some((p,i)=>!p.exists||p.get('acronym')!==identities[i].acronym||typeof p.get('company')!=='string'||!p.get('company').trim()))return fail('BILLING_RECONCILIATION_REQUIRED',409);
+  return result({customers:identities.map((x,i)=>({acronym:x.acronym,company:profiles[i].get('company')})),cursor:page.size>100?claims[claims.length-1].id:null});
+ }
+ const acronym=str(b.acronym);
  if(!slug.test(acronym))return fail('INVALID_ACRONYM');
  const {db}=service(),claim=await db.collection('commercial_acronyms').doc(acronym).get();
  const uid=claim.get('uid');if(typeof uid!=='string'||!uid)return result({payments:[]});
