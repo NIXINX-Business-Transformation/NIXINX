@@ -8,3 +8,5 @@
 .nx-tax-summary{display:grid;gap:6px;min-width:0}.nx-tax-summary small{display:block}.nx-tax-summary strong{margin-top:5px;padding-top:8px;border-top:1px solid var(--nx-border)}
 
 .nx-consent{display:grid;gap:12px;margin-top:16px}.nx-consent details{border:1px solid var(--nx-border);border-radius:10px;padding:14px;overflow-wrap:anywhere}.nx-consent summary{cursor:pointer;font-weight:650}.nx-consent label{display:flex;gap:10px;align-items:flex-start;font-size:14px}.nx-consent input[type=checkbox]{flex:none;width:18px;height:18px;accent-color:#299b82;margin-top:3px}
+
+.nx-dash [aria-invalid=true]{border-color:#c64b52!important;outline-color:#c64b52}.nx-field-error{color:#b4232b;font-weight:500;overflow-wrap:anywhere}.nx-dash[data-theme=dark] .nx-field-error{color:#ffb0b4}@media(prefers-color-scheme:dark){.nx-dash[data-theme=system] .nx-field-error{color:#ffb0b4}}
