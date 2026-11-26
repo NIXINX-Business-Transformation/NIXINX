@@ -49,15 +49,23 @@ async function webhook(req:NextRequest){
  if(s.payment_status!=='paid')return result({received:true});
  const orderId=str(s.client_reference_id);
  if(!/^[a-f0-9]{64}$/.test(orderId)||!['payment','subscription'].includes(s.mode)||s.status!=='complete'||!Number.isSafeInteger(s.amount_total)||s.amount_total<50||s.currency!=='cad'||(s.mode==='payment'&&typeof s.payment_intent!=='string')||(s.mode==='subscription'&&typeof s.subscription!=='string'))return fail('PAYMENT_MISMATCH',409);
+ const {db}=service(),ref=db.collection('commercial_orders').doc(orderId),out=db.collection('commercial_provisioning_outbox').doc(orderId);
+ const [existingOrder,existingOut]=await Promise.all([ref.get(),out.get()]);
+ if(existingOut.exists){
+  if(existingOrder.get('stripeSessionId')!==id||existingOut.get('payment.checkoutSessionId')!==id||s.metadata?.orderId!==orderId)return fail('ORDER_MISMATCH',409);
+  return result({received:true});
+ }
  let subscriptionId:string|null=null,paymentIntentId=s.payment_intent;
  if(s.mode==='subscription'){
   const sub=await stripe('subscriptions/'+encodeURIComponent(s.subscription));
-  if(sub.customer!==s.customer||sub.metadata?.orderId!==orderId||sub.status!=='active'||typeof sub.latest_invoice!=='string')return fail('PAYMENT_MISMATCH',409);
-  const invoice=await stripe('invoices/'+encodeURIComponent(sub.latest_invoice));
+  if(sub.customer!==s.customer||sub.metadata?.orderId!==orderId||typeof sub.id!=='string')return fail('PAYMENT_MISMATCH',409);
+  const invoices=await stripe('invoices?'+new URLSearchParams({subscription:sub.id,limit:'100'}));
+  const initial=invoices.data.filter((v:any)=>v.billing_reason==='subscription_create');
+  if(invoices.has_more||initial.length!==1)return fail('PAYMENT_MISMATCH',409);
+  const invoice=initial[0];
   if(invoice.status!=='paid'||invoice.billing_reason!=='subscription_create'||invoice.customer!==s.customer||invoice.subscription!==sub.id||invoice.amount_paid!==s.amount_total||invoice.currency!=='cad'||typeof invoice.payment_intent!=='string')return fail('PAYMENT_MISMATCH',409);
   subscriptionId=sub.id;paymentIntentId=invoice.payment_intent;
  }
- const {db}=service(),ref=db.collection('commercial_orders').doc(orderId),out=db.collection('commercial_provisioning_outbox').doc(orderId);
  await db.runTransaction(async tx=>{
   const [old,prior]=await Promise.all([tx.get(ref),tx.get(out)]);const order=old.data();
   if(!order||order.stripeSessionId!==id||(order.billingMode??'payment')!==s.mode||s.metadata?.orderId!==orderId||(order.stripeCustomerId&&order.stripeCustomerId!==s.customer)||order.amount!==s.amount_total||order.currency!=='cad')throw Error('ORDER_MISMATCH');
