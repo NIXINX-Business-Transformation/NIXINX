@@ -110,9 +110,39 @@ async function sync(req:NextRequest){
   return NextResponse.json({error:safe.includes(code)?code:'SYNC_FAILED'},{status:code==='STAFF_REQUIRED'?403:503,headers:cors});
  }
 }
+// Staff lookup is read-only and uses Control's existing verified financial authority.
+async function financialLookup(req:NextRequest){
+ const authorization=req.headers.get('authorization')||'';
+ if(!authorization.startsWith('Bearer ')||authorization.length>8192)return fail('STAFF_REQUIRED',401);
+ const gate=await fetch(syncOrigin+'/api/commercial/financial-authority',{method:'POST',headers:{Authorization:authorization},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(10000)});
+ if(!gate.ok)return fail('STAFF_REQUIRED',gate.status===401?401:403);
+ if((await gate.json()).authorized!==true)return fail('STAFF_REQUIRED',403);
+ const raw=await req.text();if(raw.length>2000)return fail('REQUEST_TOO_LARGE',413);
+ const b=JSON.parse(raw),acronym=str(b.acronym);
+ if(!slug.test(acronym))return fail('INVALID_ACRONYM');
+ const {db}=service(),claim=await db.collection('commercial_acronyms').doc(acronym).get();
+ const uid=claim.get('uid');if(typeof uid!=='string'||!uid)return result({payments:[]});
+ const [profile,binding,orders]=await Promise.all([db.collection('commercial_profiles').doc(uid).get(),db.collection('commercial_billing_customers').doc(uid).get(),db.collection('commercial_orders').where('uid','==',uid).limit(501).get()]);
+ if(profile.get('acronym')!==acronym||orders.size>500)return fail('BILLING_RECONCILIATION_REQUIRED',409);
+ const customer=binding.get('stripeCustomerId');if(!customer)return result({payments:[]});
+ if(binding.get('uid')!==uid||binding.get('environment')!=='sandbox'||!/^cus_[A-Za-z0-9]+$/.test(customer))return fail('BILLING_BINDING_INVALID',409);
+ const c=await stripe('customers/'+customer);
+ if(c.deleted||c.metadata?.nixinx_owner!=='nixinx-commercial-sandbox-v1'||c.metadata?.nixinx_uid_hash!==createHash('sha256').update(uid).digest('hex'))return fail('BILLING_BINDING_INVALID',409);
+ const page=await stripe('invoices?'+new URLSearchParams({customer,limit:'100'}));
+ if(page.has_more)return fail('BILLING_HISTORY_LIMIT',409);
+ const payments=page.data.flatMap((invoice:any)=>{
+  if(invoice.customer!==customer||invoice.status!=='paid'||invoice.currency!=='cad'||typeof invoice.payment_intent!=='string'||!/^pi_[A-Za-z0-9]+$/.test(invoice.payment_intent))return [];
+  const matches=orders.docs.filter(d=>d.get('status')==='paid_test'&&d.get('stripeSubscriptionId')===invoice.subscription);
+  if(matches.length!==1)return [];
+  const applicationIds=matches[0].get('applicationIds');
+  if(!Array.isArray(applicationIds)||!applicationIds.length)return [];
+  return [{paymentIntentId:invoice.payment_intent,invoiceNumber:invoice.number??null,applicationIds,amount:invoice.amount_paid,currency:'cad',date:invoice.created*1000}];
+ });
+ return result({acronym,company:profile.get('company')??null,payments});
+}
 export async function POST(req:NextRequest,{params}:Ctx){
  try{
- const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);
+ const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);if(action==='financial-lookup')return await financialLookup(req);
  if(req.headers.get('origin')!==origin()||req.nextUrl.origin!==origin())return fail('INVALID_ORIGIN',403);
  const raw=await req.text();if(raw.length>(action==='profile'?150000:10000))return fail('REQUEST_TOO_LARGE',413);const body=JSON.parse(raw||'{}');
  if(action==='google-login'){
