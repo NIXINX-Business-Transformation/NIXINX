@@ -115,9 +115,9 @@ export async function POST(req:NextRequest,{params}:Ctx){
    if(typeof body[key]!=='string'||body[key].trim().length>max)return fail('INVALID_PROFILE');
    details[key]=body[key].trim();
   }
-  if(details.contactEmail&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(details.contactEmail))return fail('INVALID_CONTACT_EMAIL');
+  if(details.contactEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(details.contactEmail))return fail('INVALID_CONTACT_EMAIL');
   if(body.avatar!==undefined){
-   if(typeof body.avatar!=='string'||body.avatar.length>120000||(body.avatar!==''&&!/^data:image\\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(body.avatar)))return fail('INVALID_AVATAR');
+   if(typeof body.avatar!=='string'||body.avatar.length>120000||(body.avatar!==''&&!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(body.avatar)))return fail('INVALID_AVATAR');
    details.avatar=body.avatar;
   }
   const claim=db.collection('commercial_acronyms').doc(acronym);
