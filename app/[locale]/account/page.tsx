@@ -39,7 +39,7 @@ export default function AccountPage(){
  <h2>{t.catalog}</h2>{!account.items.length?<p>{t.none}</p>:account.items.map(item=><div key={item.id} style={{padding:'12px 0'}}>
  <label><input type="checkbox" checked={selected.includes(item.id)} onChange={e=>setSelected(e.target.checked?[item.id]:[])}/> {item.name} · {new Intl.NumberFormat(locale==='en'?'en-CA':locale==='fr'?'fr-CA':'es-CA',{style:'currency',currency:item.currency.toUpperCase()}).format(item.amount/100)} CAD</label>
  {profile.acronym&&<p>{t.domain}: {profile.acronym}.{item.id}.nixinx.app</p>}</div>)}
- <button className="button primary" disabled={busy||!account.profile||!selected.length||account.orders.some(o=>o.status==='paid_test')} onClick={()=>void run(async()=>{const r=await api('checkout',{locale,applicationIds:selected});window.location.assign(r.url);})}>{t.pay}</button>
+ <button className="button primary" style={{opacity:busy||!account.profile||!selected.length||account.orders.some(o=>o.status==='paid_test')?0.45:1}} disabled={busy||!account.profile||!selected.length||account.orders.some(o=>o.status==='paid_test')} onClick={()=>void run(async()=>{const r=await api('checkout',{locale,applicationIds:selected});window.location.assign(r.url);})}>{t.pay}</button>
  {account.orders.length>0&&<p role="status">{account.orders.some(o=>o.status==='paid_test')?t.paid:t.pending}</p>}
  <button className="button secondary" disabled={busy} onClick={()=>void run(async()=>{await api('logout',{});setAccount(null);setProfile(empty);setSelected([]);})}>{t.logout}</button>
  </>}{message&&<p role="status" style={{overflowWrap:'anywhere'}}>{message}</p>}
