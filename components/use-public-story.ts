@@ -20,7 +20,7 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
   if(!node||typeof window.matchMedia!=='function')return;
   const root:HTMLElement=node;
   const motion=window.matchMedia('(prefers-reduced-motion: reduce)');
-  let groups:Group[]=[];let frame=0;let resizeFrame=0;let running=false;let lastY=window.scrollY;let width=window.innerWidth;
+  let groups:Group[]=[];let frame=0;let resizeFrame=0;let running=false;let lastY=window.scrollY;let width=window.innerWidth;let shortViewport=window.innerHeight<560;
   const managed=new Set<HTMLElement>();
   function clear(){
    root.removeAttribute('data-story-ready');
@@ -83,7 +83,7 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
    for(const group of changes)for(const el of group.items)el.dataset.storyState=group.shown?'shown':'waiting';
   }
   function schedule(){if(running&&!frame)frame=requestAnimationFrame(tick);}
-  function resize(){if(window.innerWidth===width)return;width=window.innerWidth;if(resizeFrame)cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;setup();});}
+  function resize(){const short=window.innerHeight<560;if(window.innerWidth===width&&short===shortViewport)return;width=window.innerWidth;shortViewport=short;if(resizeFrame)cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;setup();});}
   function stop(){
    running=false;if(frame)cancelAnimationFrame(frame);if(resizeFrame)cancelAnimationFrame(resizeFrame);frame=resizeFrame=0;
    window.removeEventListener('scroll',schedule);window.removeEventListener('resize',resize);
@@ -92,7 +92,7 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
   function start(){
    stop();
    if(motion.matches||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
-   running=true;width=window.innerWidth;root.dataset.storyMode='trigger';setup();
+   running=true;width=window.innerWidth;shortViewport=window.innerHeight<560;root.dataset.storyMode='trigger';setup();
    window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',resize,{passive:true});root.addEventListener('focusin',schedule);
   }
   start();

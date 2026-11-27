@@ -4,6 +4,7 @@ on:
     paths:
       - 'components/site.tsx'
       - 'components/use-public-story.ts'
+      - 'components/use-cursor-mist.ts'
       - 'components/public-story.css'
       - 'app/style.css'
       - 'tests/public-story-browser.mjs'
@@ -11,6 +12,12 @@ on:
 jobs:
   browser:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, webkit]
+    env:
+      NX_QA_ENGINE: ${{ matrix.engine }}
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +28,7 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - run: npm install --no-save --package-lock=false --no-audit --no-fund playwright@1.56.1
-      - run: npx playwright install --with-deps chromium webkit
+      - run: npx playwright install --with-deps ${{ matrix.engine }}
       - run: npm run build
       - name: Public homepage local browser QA (no external API)
         run: |

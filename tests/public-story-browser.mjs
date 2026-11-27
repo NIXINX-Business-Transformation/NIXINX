@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {chromium,webkit} from 'playwright';
 const base='http://127.0.0.1:3100';
-const sizes=[[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[820,1180],[1024,768],[1280,800],[1440,900],[1920,1080]];
-for(const engine of [chromium,webkit]){
+const sizes=[[320,568],[568,320],[375,667],[667,375],[390,844],[844,390],[430,932],[932,430],[768,1024],[1024,768],[820,1180],[1180,820],[1024,1366],[1366,1024],[1280,800],[1440,900],[1920,1080]];
+const engines=process.env.NX_QA_ENGINE==='chromium'?[chromium]:process.env.NX_QA_ENGINE==='webkit'?[webkit]:[chromium,webkit];
+for(const engine of engines){
  const browser=await engine.launch({headless:true});
  try{
  for(const locale of ['en','es','fr']){
@@ -50,10 +51,33 @@ for(const engine of [chromium,webkit]){
    await page.evaluate(()=>window.scrollTo(0,0));
    const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,head:document.querySelector('h1').textContent,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth}));
    assert.equal(initial.hero,end.hero);assert.equal(initial.nav,end.nav);assert.equal(initial.head,end.head);assert.ok(end.overflow<=1,'horizontal overflow');
+   const outside=await page.evaluate(()=>[...document.querySelectorAll('.nav-wrap > *, .hero-copy, .hero-pillars, .stage-item,.capability,.flow-with-arrow,.industry-list > div,.orbit-badge,.usecase-grid article,.revenue-grid article,.lead-form')].filter(el=>el.getClientRects().length).map(el=>({name:el.className,left:el.getBoundingClientRect().left,right:el.getBoundingClientRect().right})).filter(r=>r.left< -1||r.right>document.documentElement.clientWidth+1));
+   assert.deepEqual(outside,[],'settled elements remain inside viewport');
    await page.emulateMedia({reducedMotion:'no-preference'});
    console.log('PASS',engine.name(),locale,width,height,'reversible autonomous motion');
   }
   await ctx.close();
+ }
+ // Rotate a real touch-enabled browser context without reloading; keep nav and motion functional.
+ for(const [pw,ph] of [[390,844],[820,1180],[1024,1366]]){
+  const touch=await browser.newContext({viewport:{width:pw,height:ph},hasTouch:true,isMobile:true,serviceWorkers:'block',reducedMotion:'no-preference'});
+  await touch.route('**/*',r=>new URL(r.request().url()).origin===base&&!r.request().url().includes('/api/')?r.continue():r.abort());
+  const page=await touch.newPage();await page.goto(base+'/es');await page.locator('.public-story[data-story-ready="true"]').waitFor();
+  for(const [w,h] of [[pw,ph],[ph,pw],[pw,ph]]){
+   await page.setViewportSize({width:w,height:h});
+   await page.evaluate(()=>{document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,0)});
+   await page.waitForFunction(()=>document.querySelector('.public-story').dataset.storyReady==='true'&&window.scrollY===0);
+   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+   assert.equal(await page.evaluate(()=>innerWidth),w);
+   const outside=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
+   assert.ok(outside<=1,'rotation overflow');
+   await page.evaluate(()=>document.querySelector('.public-story').dispatchEvent(new PointerEvent('pointermove',{pointerType:'touch',clientX:150,clientY:150,bubbles:true})));
+   assert.equal(await page.locator('.nx-cursor-mist[data-mist="moving"]').count(),0,'mist disabled for touch');
+   await page.evaluate(()=>{let e=document.querySelector('.stage-item'),y=0;while(e){y+=e.offsetTop;e=e.offsetParent;}window.scrollTo(0,y-innerHeight*.55)});
+   await page.waitForFunction(()=>document.querySelector('.stage-item').dataset.storyState==='shown');
+   console.log('PASS',engine.name(),'touch rotation',w,h);
+  }
+  await touch.close();
  }
  }finally{await browser.close();}
 }
