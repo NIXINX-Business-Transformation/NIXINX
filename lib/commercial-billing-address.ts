@@ -28,3 +28,19 @@ export function confirmedFiscalProfileChange(confirmed:unknown,submitted:unknown
  return Object.keys(a).length===fiscalProfileFields.length&&fiscalProfileFields.every(k=>a[k]===b[k]);
 }
 export function profileRevisionMatches(submitted:unknown,current:string){return typeof submitted==="string"&&/^[a-f0-9]{64}$/.test(submitted)&&submitted===current;}
+
+// Conservative comparison of the immutable declared address and Stripe's
+// effective address. No fuzzy street equivalence or automatic synchronization.
+export function stripeFiscalAddressMatches(policy:unknown,address:unknown,declaredLine2:unknown){
+ if(!policy||typeof policy!=="object"||!address||typeof address!=="object"||Array.isArray(address))return false;
+ const p=policy as Record<string,unknown>,a=address as Record<string,unknown>;
+ const normalized=(v:unknown)=>clean(v).replace(/\s+/g," ").toUpperCase();
+ const actual={country:countryCode(a.country),province:provinceCode(a.state),postal:normalized(a.postal_code).replace(/\s/g,""),city:normalized(a.city),line1:normalized(a.line1)};
+ return fields.every(k=>actual[k]!==""&&actual[k]===normalized(p[k]))&&normalized(a.line2)===normalized(declaredLine2);
+}
+export function paidFiscalReviewRequired(policy:unknown,line2:unknown,sessionAddress:unknown,invoiceAddress:unknown){
+ return !stripeFiscalAddressMatches(policy,sessionAddress,line2)||!stripeFiscalAddressMatches(policy,invoiceAddress,line2);
+}
+export function sameHeldPayment(order:Record<string,unknown>,payment:{sessionId:string;paymentIntentId:string;subscriptionId:string|null;amount:number}){
+ return order.status==="paid_review_test"&&order.stripeSessionId===payment.sessionId&&order.stripePaymentIntentId===payment.paymentIntentId&&order.stripeSubscriptionId===payment.subscriptionId&&order.amount===payment.amount&&order.currency==="cad";
+}

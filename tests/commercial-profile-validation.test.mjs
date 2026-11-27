@@ -36,7 +36,7 @@ test("both legal and operating names required; may be identical; personal name m
  assert.equal(legalBillingName("Test\u200b Inc."),null);
 });
 
-const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
+const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,stripeFiscalAddressMatches,paidFiscalReviewRequired,sameHeldPayment}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
 test("declared billing confirmation binds only to the exact current server snapshot",()=>{
  const saved={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
  assert.equal(confirmedDeclaredTaxAddress(true,{...saved},saved),true);
@@ -61,4 +61,23 @@ test("profile revisions reject missing, stale and different-account tokens",()=>
  const token="a".repeat(64),foreign="b".repeat(64);
  assert.equal(profileRevisionMatches(token,token),true);
  for(const value of [undefined,null,"",foreign,true])assert.equal(profileRevisionMatches(value,token),false);
+});
+
+test("paid address mismatch is held, including unknown evidence, other province, or changed unit",()=>{
+ const policy={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ const address={country:"CA",state:"Ontario",postal_code:"n9a 1a1",city:"WINDSOR",line1:"100 MAIN ST",line2:"Unit 2"};
+ assert.equal(stripeFiscalAddressMatches(policy,address,"Unit 2"),true);
+ assert.equal(paidFiscalReviewRequired(policy,"Unit 2",address,address),false);
+ for(const bad of [null,{...address,line1:"101 Main St"},{...address,state:"QC"},{...address,country:"US"},{...address,line2:"Unit 3"},{...address,line1:"100 Main Street"}]){
+  assert.equal(paidFiscalReviewRequired(policy,"Unit 2",bad,address),true);
+  assert.equal(paidFiscalReviewRequired(policy,"Unit 2",address,bad),true);
+ }
+ assert.deepEqual(availableCommercialItems([{id:"corporate"},{id:"initiatives"}],[{status:"paid_review_test",applicationIds:["corporate"]}]),[{id:"initiatives"}]);
+});
+test("held payment replay matches immutable payment and cannot resume",()=>{
+ const payment={sessionId:"cs_test_fixture",paymentIntentId:"pi_fixture",subscriptionId:"sub_fixture",amount:57};
+ const order={status:"paid_review_test",stripeSessionId:payment.sessionId,stripePaymentIntentId:payment.paymentIntentId,stripeSubscriptionId:payment.subscriptionId,amount:57,currency:"cad"};
+ assert.equal(sameHeldPayment(order,payment),true);
+ for(const changes of [{amount:58},{paymentIntentId:"pi_other"},{subscriptionId:"sub_other"},{sessionId:"cs_test_other"}])assert.equal(sameHeldPayment(order,{...payment,...changes}),false);
+ assert.equal(resumableCommercialOrder(order,"owner","v1"),false);
 });
