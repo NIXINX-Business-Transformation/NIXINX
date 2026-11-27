@@ -13,6 +13,7 @@ import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress,knownStripeAddressConflicts} from '@/lib/commercial-billing-address';
 import {invoiceAdjustments} from '@/lib/commercial-invoice-adjustments';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
+import {notifySupportRequest} from '@/lib/commercial-support-notification';
 import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -313,9 +314,23 @@ export async function POST(req:NextRequest,{params}:Ctx){
    const orders=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
    if(orders.size>500||!cancellationApplicationIds(orders.docs.map(d=>({status:d.get('status'),billingMode:d.get('billingMode'),applicationIds:d.get('applicationIds')}))).includes(appId))return fail('APPLICATION_NOT_CONTRACTED',409);
   }
-  const ref=db.collection('commercial_support_requests').doc();
-  await ref.create({uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null,status:'OPEN',createdAt:FieldValue.serverTimestamp()});
-  return result({id:ref.id},201);
+  const requestId=str(body.requestId);
+  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(requestId))return fail('SUPPORT_REFRESH_REQUIRED',409);
+  const ref=db.collection('commercial_support_requests').doc(createHash('sha256').update(JSON.stringify([u.uid,requestId])).digest('hex'));
+  const request={uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null};
+  const created=await db.runTransaction(async tx=>{
+   const old=await tx.get(ref);
+   if(old.exists){if(Object.entries(request).some(([k,v])=>old.get(k)!==v))throw Error('SUPPORT_REQUEST_CONFLICT');return false;}
+   tx.create(ref,{...request,status:'OPEN',createdAt:FieldValue.serverTimestamp(),internalNotification:{status:'PENDING',provider:'resend'}});
+   return true;
+  });
+  if(created){
+   const notification=await notifySupportRequest(ref.id,kind,{SUPPORT_NOTIFICATIONS_ENABLED:process.env.SUPPORT_NOTIFICATIONS_ENABLED,RESEND_API_KEY:process.env.RESEND_API_KEY,RESEND_FROM_EMAIL:process.env.RESEND_FROM_EMAIL,SUPPORT_NOTIFY_EMAIL:process.env.SUPPORT_NOTIFY_EMAIL});
+   // Do not lose or duplicate a saved request when transport or audit update fails.
+   // A PENDING record after a crash requires operator review, not an automatic resend.
+   await ref.update({internalNotification:{...notification,provider:'resend',checkedAt:FieldValue.serverTimestamp()}}).catch(()=>{});
+  }
+  return result({id:ref.id},created?201:200);
  }
  if(action==='resume-checkout'){
   const orderId=typeof body.orderId==='string'?body.orderId:'';
@@ -377,5 +392,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED','BILLING_ADDRESS_REVIEW_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND'||c==='INVOICE_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED','BILLING_ADDRESS_REVIEW_REQUIRED','SUPPORT_REQUEST_CONFLICT'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND'||c==='INVOICE_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }

@@ -97,3 +97,17 @@ test("cancellation requests include held paid subscriptions, not pending or hist
  assert.deepEqual(cancellationApplicationIds(orders),["corporate","initiatives"]);
  assert.deepEqual(availableCommercialItems([{id:"corporate"},{id:"initiatives"},{id:"supply"},{id:"other"}],orders),[{id:"other"}]);
 });
+
+const {notifySupportRequest}=await import(url(compile("../lib/commercial-support-notification.ts")));
+test("support notification is opt-in, minimal, fixed-recipient and idempotent per persisted request",async()=>{
+ const id="a".repeat(64),config={SUPPORT_NOTIFICATIONS_ENABLED:"true",RESEND_API_KEY:"fixture",RESEND_FROM_EMAIL:"sender@example.com",SUPPORT_NOTIFY_EMAIL:"support@nixinx.com"};
+ let calls=0;
+ const mock=async (url,options)=>{calls++;assert.equal(url,"https://api.resend.com/emails");assert.equal(options.headers["Idempotency-Key"],"nixinx-support/"+id);const body=JSON.parse(options.body);assert.deepEqual(body.to,["support@nixinx.com"]);assert.ok(body.text.includes(id));assert.ok(!("reply_to" in body));return new Response(JSON.stringify({id:"49a3999c-0ce1-4ea6-ab68-afcd6dc2e794"}),{status:200});};
+ assert.deepEqual(await notifySupportRequest(id,"claim",{},mock),{status:"NOT_CONFIGURED"});
+ assert.deepEqual(await notifySupportRequest(id,"claim",{...config,SUPPORT_NOTIFY_EMAIL:"other@example.com"},mock),{status:"FAILED"});
+ assert.equal(calls,0);
+ assert.equal((await notifySupportRequest(id,"claim",config,mock)).status,"ACCEPTED");
+ assert.equal(calls,1);
+ assert.deepEqual(await notifySupportRequest(id,"claim",config,async()=>{throw Error("transport");}),{status:"UNKNOWN"});
+ assert.deepEqual(await notifySupportRequest(id,"claim",config,async()=>new Response("",{status:403})),{status:"FAILED"});
+});
