@@ -1,73 +1,115 @@
 'use client';
 import {useEffect,type RefObject} from 'react';
 
-// Scroll-linked editorial motion on the public homepage, including Safari.
-// A single passive listener schedules one frame; no React updates on scroll.
-const selectors=[
+// Scroll is a starting signal, never an animation clock. Group visible rows
+// so a single intersection starts their entire time-based stagger.
+const singles=[
  '.hero-continuity > div:first-child','.vision > div',
  '.section-heading > div:first-child','.section-heading > p',
- '.stage-item','.capability','.flow-node','.arch-footer',
- '.industry-copy > h2','.industry-list > div','.usecases > h2',
- '.usecase-grid article','.assessment-promo > div','.revenue-grid article',
- '.business-note','.contact > div:first-child > h2',
+ '.arch-footer','.industry-copy > h2','.usecases > h2',
+ '.assessment-promo > div','.business-note','.contact > div:first-child > h2',
 ].join(',');
-const clamp=(n:number)=>Math.max(0,Math.min(1,n));
+const grids=[
+ ['.stage-list','.stage-item'],['.capability-grid','.capability'],
+ ['.architecture-flow','.flow-node'],['.industry-list',':scope > div'],
+ ['.usecase-grid','article'],['.revenue-grid','article'],
+];
 export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
  useEffect(()=>{
   const root=ref.current;
-  if(!root||typeof window.matchMedia!=='function'||typeof window.requestAnimationFrame!=='function')return;
+  if(!root||typeof window.matchMedia!=='function')return;
   const motion=window.matchMedia('(prefers-reduced-motion: reduce)');
-  const hero=root.querySelector<HTMLElement>('.executive-hero');
-  const targets=Array.from(root.querySelectorAll<HTMLElement>(selectors)).map(el=>({el,y:0,progress:1}));
-  let frame=0,running=false;
-  const clear=()=>{
-   targets.forEach(t=>{t.el.style.removeProperty('--nx-story-y');t.el.style.removeProperty('--nx-story-progress');t.y=0;t.progress=1;});
-   root.style.removeProperty('--nx-hero-progress');
+  const consumed=new Set<HTMLElement>();
+  const managed=new Set<HTMLElement>();
+  const groups=new Map<HTMLElement,HTMLElement[]>();
+  let observer:IntersectionObserver|undefined;
+  let width=window.innerWidth;
+  let running=false;
+  const reset=(el:HTMLElement)=>{
+   el.removeAttribute('data-story-state');el.style.removeProperty('--nx-story-delay');managed.delete(el);
   };
-  const update=()=>{
-   frame=0;
-   if(!running||motion.matches)return;
-   const vh=window.innerHeight;
-   const small=window.innerWidth<=750||vh<=540;
-   const distance=Math.min(small?52:88,vh*(small?.13:.16));
-   const heroProgress=hero?clamp(-hero.getBoundingClientRect().top/Math.min(620,Math.max(240,hero.offsetHeight*.65))):0;
-   // Read geometry before writing styles; compensate the preceding translation.
-   const next=targets.map(t=>{
-    const rect=t.el.getBoundingClientRect();
-    const top=rect.top-t.y;
-    const parent=t.el.parentElement;
-    const grouped=t.el.matches('.stage-item,.capability,.usecase-grid article,.revenue-grid article,.flow-node,.industry-list > div');
-    const item=t.el.matches('.flow-node')?parent:t.el;
-    const index=grouped&&item?.parentElement?Array.prototype.indexOf.call(item.parentElement.children,item):0;
-    const delay=small?0:Math.min(3,Math.max(0,index))*0.065;
-    // Keep motion active well inside the viewport (not just at the lower edge).
-    const progress=clamp((vh*.98-top)/(vh*.72)-delay);
-    const p=t.el.matches(':focus-within')?1:progress;
-    // Gentle easing, with a longer perceptible middle phase.
-    const eased=p;
-    return {t,y:Math.round(distance*(1-eased)*100)/100,p:Math.round(eased*1000)/1000};
-   });
-   root.style.setProperty('--nx-hero-progress',String(heroProgress));
-   for(const {t,y,p} of next){
-    if(y!==t.y){t.el.style.setProperty('--nx-story-y',y+'px');t.y=y;}
-    if(p!==t.progress){t.el.style.setProperty('--nx-story-progress',String(p));t.progress=p;}
+  const clear=()=>{
+   observer?.disconnect();observer=undefined;groups.clear();
+   for(const el of managed)reset(el);
+  };
+  const play=(group:HTMLElement[])=>{
+   for(const el of group){
+    consumed.add(el);
+    if(el.matches(':focus-within'))reset(el);
+    else el.dataset.storyState='running';
    }
   };
-  const schedule=()=>{if(running&&!frame)frame=window.requestAnimationFrame(update);};
+  const setup=()=>{
+   clear();
+   if(!running)return;
+   const vh=window.innerHeight;
+   const candidates:HTMLElement[][]=Array.from(root.querySelectorAll<HTMLElement>(singles),el=>[el]);
+   for(const [container,selector] of grids){
+    for(const grid of root.querySelectorAll(container)){
+     const rows:HTMLElement[][]=[];
+     for(const el of grid.querySelectorAll<HTMLElement>(selector)){
+      const last=rows[rows.length-1];
+      if(last&&Math.abs(last[0].getBoundingClientRect().top-el.getBoundingClientRect().top)<4)last.push(el);
+      else rows.push([el]);
+     }
+     candidates.push(...rows);
+    }
+   }
+   observer=new IntersectionObserver(entries=>{
+    for(const entry of entries){
+     if(!entry.isIntersecting)continue;
+     const anchor=entry.target as HTMLElement;
+     const group=groups.get(anchor);
+     if(!group)continue;
+     observer?.unobserve(anchor);groups.delete(anchor);play(group);
+    }
+   },{rootMargin:'0px 0px -10% 0px',threshold:0.01});
+   for(const row of candidates){
+    // Do not reposition anything that was already visible on first paint,
+    // on deep links, after a resize, or when motion preferences change.
+    const group=row.filter(el=>!consumed.has(el)&&el.getBoundingClientRect().top>=vh);
+    if(!group.length)continue;
+    group.forEach((el,i)=>{
+     el.style.setProperty('--nx-story-delay',Math.min(i,5)*125+'ms');
+     managed.add(el);el.dataset.storyState='armed';
+    });
+    groups.set(group[0],group);observer.observe(group[0]);
+   }
+  };
+  const heroExit=()=>{
+   // Only a discrete threshold changes state. CSS owns the whole transition.
+   if(window.scrollY>72)root.dataset.storyHero='exit';
+   else if(window.scrollY<=12)delete root.dataset.storyHero;
+  };
+  const resize=()=>{if(window.innerWidth!==width){width=window.innerWidth;setup();}};
+  const finished=(event:AnimationEvent)=>{
+   if(event.animationName!=='nx-public-rise')return;
+   if(event.target instanceof HTMLElement&&managed.has(event.target))reset(event.target);
+  };
+  const focus=(event:FocusEvent)=>{
+   if(!(event.target instanceof Element))return;
+   const el=event.target.closest<HTMLElement>('[data-story-state]');
+   if(!el||!managed.has(el))return;
+   for(const [anchor,group] of groups){
+    if(!group.includes(el))continue;
+    observer?.unobserve(anchor);groups.delete(anchor);
+    for(const member of group){consumed.add(member);reset(member);}
+    return;
+   }
+   consumed.add(el);reset(el);
+  };
   const stop=()=>{
-   running=false;window.removeEventListener('scroll',schedule);window.removeEventListener('resize',schedule);
-   root.removeEventListener('focusin',schedule);root.removeEventListener('focusout',schedule);
-   if(frame)window.cancelAnimationFrame(frame);frame=0;clear();
+   running=false;clear();delete root.dataset.storyHero;
+   window.removeEventListener('scroll',heroExit);window.removeEventListener('resize',resize);
+   root.removeEventListener('animationend',finished);root.removeEventListener('animationcancel',finished);root.removeEventListener('focusin',focus);
   };
   const start=()=>{
    stop();
-   if(motion.matches||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
-   running=true;
-   root.dataset.storyMode='scroll';
-   update();
-   window.addEventListener('scroll',schedule,{passive:true});
-   window.addEventListener('resize',schedule,{passive:true});
-   root.addEventListener('focusin',schedule);root.addEventListener('focusout',schedule);
+   if(motion.matches||typeof IntersectionObserver==='undefined'||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
+   running=true;width=window.innerWidth;setup();heroExit();
+   window.addEventListener('scroll',heroExit,{passive:true});window.addEventListener('resize',resize,{passive:true});
+   root.addEventListener('animationend',finished);root.addEventListener('animationcancel',finished);root.addEventListener('focusin',focus);
+   root.dataset.storyMode='trigger';
   };
   start();
   if(typeof motion.addEventListener==='function')motion.addEventListener('change',start);

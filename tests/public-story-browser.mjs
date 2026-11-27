@@ -12,38 +12,41 @@ for(const engine of [chromium,webkit]){
   for(const [width,height] of sizes){
    await page.setViewportSize({width,height});
    await page.goto(base+'/'+locale);
-   await page.locator('.public-story[data-story-mode="scroll"]').waitFor();
+   await page.locator('.public-story[data-story-mode="trigger"]').waitFor();
    const initial=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,head:document.querySelector('h1').textContent}));
    assert.equal(await page.locator('.site-header .nav-login').count(),1);
-   await page.evaluate(()=>{document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,220)});
-   await page.waitForFunction(()=>Number(document.querySelector('.public-story').style.getPropertyValue('--nx-hero-progress'))>0);
-   const facade=await page.locator('.hero-facade').evaluate((el,small)=>getComputedStyle(el,small?'::after':null).scale,width<=750);
-   assert.ok(parseFloat(facade)<1&&parseFloat(facade)>=.90,'visible facade recession '+facade);
-   const stages=page.locator('.stage-item').first();
-   const position=async fraction=>page.evaluate(({fraction})=>{const el=document.querySelector('.stage-item');const y=parseFloat(el.style.getPropertyValue('--nx-story-y'))||0;window.scrollTo(0,window.scrollY+el.getBoundingClientRect().top-y-innerHeight*fraction)},{fraction});
-   const state=()=>stages.evaluate(el=>({y:parseFloat(el.style.getPropertyValue('--nx-story-y')),top:el.getBoundingClientRect().top/innerHeight}));
-   await position(.72);
-   await page.waitForFunction(()=>{const e=document.querySelector('.stage-item'),y=parseFloat(e.style.getPropertyValue('--nx-story-y'));return y>20&&e.getBoundingClientRect().top/innerHeight<.9});
-   const first=await state();
-   await position(.50);
-   await page.waitForFunction(previous=>{const e=document.querySelector('.stage-item'),y=parseFloat(e.style.getPropertyValue('--nx-story-y'));return y>8&&y<previous-5},first.y);
-   const middle=await state();
-   assert.ok(first.top<.9&&middle.top<.7&&middle.y>8,'motion persists inside viewport');
-   await position(.15);
-   await page.waitForFunction(()=>parseFloat(document.querySelector('.stage-item').style.getPropertyValue('--nx-story-y'))===0);
-   await position(.72);
-   await page.waitForFunction(()=>parseFloat(document.querySelector('.stage-item').style.getPropertyValue('--nx-story-y'))>20);
-   const entry=first.y;
+   await page.evaluate(()=>{document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,100)});
+   await page.locator('.public-story[data-story-hero="exit"]').waitFor();
+   await page.waitForFunction(small=>parseFloat(getComputedStyle(document.querySelector('.hero-facade'),small?'::after':null).scale)<.98,width<=750);
+   const first=page.locator('.stage-item').first();
+   assert.equal(await first.getAttribute('data-story-state'),'armed');
+   await page.evaluate(()=>{const el=document.querySelector('.stage-item');window.scrollTo(0,window.scrollY+el.getBoundingClientRect().top-innerHeight*.65)});
+   await page.waitForFunction(()=>document.querySelector('.stage-item')?.getAttribute('data-story-state')==='running');
+   const snapshot=()=>page.evaluate(()=>{const el=document.querySelector('.stage-item');return {scroll:window.scrollY,dy:el.getBoundingClientRect().top,translate:parseFloat(getComputedStyle(el).translate.split(' ')[1]||'0'),row:[...document.querySelectorAll('.stage-item')].map(x=>({state:x.getAttribute('data-story-state'),delay:getComputedStyle(x).animationDelay}))};});
+   const start=await snapshot();
+   if(width>750){
+    assert.equal(start.row[1].state,'running','same row launched by one trigger');
+    assert.ok(parseFloat(start.row[1].delay)>parseFloat(start.row[0].delay),'stagger');
+   }
+   await page.waitForFunction(previous=>{const e=document.querySelector('.stage-item');return parseFloat(getComputedStyle(e).translate.split(' ')[1]||'0')<previous-8},start.translate);
+   const middle=await snapshot();
+   assert.ok(Math.abs(middle.scroll-start.scroll)<1,'scroll remained fixed during animation');
+   assert.ok(middle.dy<start.dy-8,'visible autonomous motion');
+   await page.waitForFunction(()=>!document.querySelector('.stage-item').hasAttribute('data-story-state'));
+   const done=await snapshot();
+   assert.ok(Math.abs(done.scroll-start.scroll)<1,'animation finished without further scrolling');
+   await page.evaluate(()=>window.scrollTo(0,0));
+   await page.waitForFunction(()=>!document.querySelector('.public-story').hasAttribute('data-story-hero'));
+   assert.equal(await first.getAttribute('data-story-state'),null,'one-shot');
    await page.emulateMedia({reducedMotion:'reduce'});
    await page.locator('.public-story[data-story-mode="off"]').waitFor();
-   assert.equal(await stages.evaluate(el=>el.style.getPropertyValue('--nx-story-y')),'');
-   await page.evaluate(()=>window.scrollTo(0,0));
+   assert.equal(await page.locator('[data-story-state]').count(),0);
    const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,head:document.querySelector('h1').textContent}));
    assert.equal(initial.hero,end.hero);assert.equal(initial.nav,end.nav);assert.equal(initial.head,end.head);
    assert.ok(initial.overflow<=1,'horizontal overflow '+locale+' '+width+': '+initial.overflow);
    assert.ok(end.overflow<=1,'horizontal overflow reduced motion');
    await page.emulateMedia({reducedMotion:'no-preference'});
-   console.log('PASS',engine.name(),locale,width,height,'motion',entry);
+   console.log('PASS',engine.name(),locale,width,height,'autonomous motion at fixed scroll');
   }
   await ctx.close();
  }

@@ -1,48 +1,53 @@
-/* Public homepage only — scroll-linked executive narrative.
-   Original hero, logo, text, controls, palette and geometry preserved. */
+/* Public homepage only. The scroll fires a time-based editorial sequence;
+   it never scrubs animation frames. Static design and layout are preserved. */
 .public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article){animation:none}
 @media(prefers-reduced-motion:no-preference){
- .public-story[data-story-mode="scroll"] :is(.hero-continuity>div:first-child,.vision>div,.section-heading>div:first-child,.section-heading>p,.stage-item,.capability,.flow-node,.arch-footer,.industry-copy>h2,.industry-list>div,.usecases>h2,.usecase-grid article,.assessment-promo>div,.revenue-grid article,.business-note,.contact>div:first-child>h2){
-  translate:0 var(--nx-story-y,0px);
+ .public-story{
+  --nx-story-distance:80px;
+  --nx-story-duration:1050ms;
+  --nx-story-ease:cubic-bezier(.22,.61,.36,1);
  }
- /* Existing symbols and number accents build the service narrative. */
- .public-story[data-story-mode="scroll"] .flow-node .flow-symbol,
- .public-story[data-story-mode="scroll"] .capability .cap-icon,
- .public-story[data-story-mode="scroll"] .usecase-grid .usecase-icon{
-  scale:calc(.78 + .22 * var(--nx-story-progress,1));
-  transform-origin:left center;
+ @media(max-width:750px),(max-height:540px){
+  .public-story{--nx-story-distance:48px;--nx-story-duration:900ms}
  }
- .public-story[data-story-mode="scroll"] .flow-node{
-  border-color:color-mix(in srgb,#83dfc7 calc(100% * (1 - var(--nx-story-progress,1))),#52746b);
+ .public-story[data-story-mode="trigger"] [data-story-state="armed"]{
+  translate:0 var(--nx-story-distance);
  }
- .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
+ .public-story[data-story-mode="trigger"] [data-story-state="running"]{
+  animation:nx-public-rise var(--nx-story-duration) var(--nx-story-ease) both;
+  animation-delay:var(--nx-story-delay,0ms);
+  animation-timeline:auto;
+ }
+ .public-story[data-story-mode="trigger"] [data-story-state]:focus-within{
+  animation:none;translate:none;
+ }
+ /* Keep text at full opacity. A brief accent emphasizes the existing flow. */
+ .public-story[data-story-mode="trigger"] .flow-node[data-story-state="running"]{
+  animation-name:nx-public-rise,nx-public-accent;
+ }
+ .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{
   animation:none;
  }
- /* Reverse the depth effect: the facade recedes on exit, not on entry.
-    At scroll position zero the approved facade is unchanged. */
  @media(min-width:751px){
-  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
-   scale:calc(1 - .09 * var(--nx-hero-progress,0));
-   transform-origin:right center;
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{
+   scale:1;transform-origin:right center;
+   transition:scale 1150ms var(--nx-story-ease);
   }
+  .public-story[data-story-mode="trigger"][data-story-hero="exit"] .executive-hero .hero-facade{scale:.91}
  }
  @media(max-width:750px){
-  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
-   overflow:hidden;
-   background-image:none;
-  }
-  /* Keep the mobile image inside its existing frame; animate only a visual
-     layer, not the box or surrounding text. */
-  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade::after{
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{overflow:hidden;background-image:none}
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade::after{
    content:'';position:absolute;inset:0;pointer-events:none;
    background-image:linear-gradient(180deg,#1b2b31 0%,transparent 24%,transparent 68%,#1b2b31 100%),url('/images/nixinx-hero-facade.webp');
    background-size:cover;background-position:center 44%;background-repeat:no-repeat;
-   scale:calc(1 - .09 * var(--nx-hero-progress,0));
-   transform-origin:center;
+   scale:1;transform-origin:center;transition:scale 1150ms var(--nx-story-ease);
   }
+  .public-story[data-story-mode="trigger"][data-story-hero="exit"] .executive-hero .hero-facade::after{scale:.91}
  }
- .public-story[data-story-mode="scroll"] :is(.hero-continuity>div:first-child,.vision>div,.section-heading>div:first-child,.section-heading>p,.stage-item,.capability,.flow-node,.arch-footer,.industry-copy>h2,.industry-list>div,.usecases>h2,.usecase-grid article,.assessment-promo>div,.revenue-grid article,.business-note,.contact>div:first-child>h2):focus-within{translate:none}
 }
+@keyframes nx-public-rise{from{translate:0 var(--nx-story-distance)}to{translate:0 0}}
+@keyframes nx-public-accent{0%,15%{border-color:#83dfc7}100%{border-color:#52746b}}
 @media(prefers-reduced-motion:reduce){
- .public-story[data-story-mode="scroll"] *{translate:none!important;scale:none!important}
+ .public-story [data-story-state]{animation:none!important;translate:none!important}
 }
