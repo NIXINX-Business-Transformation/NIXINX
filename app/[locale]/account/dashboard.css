@@ -101,3 +101,6 @@
 .nx-dash .nx-fiscal-notice{display:grid;gap:10px;margin-top:14px;align-items:start}
 .nx-dash .nx-fiscal-notice p{margin:0}.nx-dash .nx-fiscal-notice label{max-width:100%;overflow-wrap:anywhere;min-height:44px}.nx-dash .nx-fiscal-notice input[type=checkbox]{flex:none;accent-color:#299b82;width:18px;height:18px}
 .nx-dash .nx-stripe-panel .nx-stripe-details{font-size:13px;color:inherit}
+
+/* Minimal native Stripe document readback, within existing invoice panel. */
+.nx-dash .nx-invoice-adjustments{padding:0 0 12px;min-width:0}.nx-dash .nx-invoice-adjustments button{min-height:44px;max-width:100%;white-space:normal}.nx-dash .nx-invoice-adjustments .nx-record{flex-wrap:wrap;overflow-wrap:anywhere}.nx-dash .nx-invoice-adjustments .nx-link{min-height:44px;display:inline-flex;align-items:center;white-space:normal}
