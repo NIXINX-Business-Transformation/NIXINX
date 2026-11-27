@@ -6,7 +6,7 @@ const compile=(p)=>ts.transpileModule(fs.readFileSync(new URL(p,import.meta.url)
 const url=(s)=>"data:text/javascript;base64,"+Buffer.from(s).toString("base64");
 const geo=url(compile("../lib/commercial-geography.ts"));
 const {validateCommercialProfile,normalizeCanadianPostal,legalBillingName}=await import(url(compile("../lib/commercial-profile-validation.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
-const {availableCommercialItems,resumableCommercialOrder,openCheckoutUrl}=await import(url(compile("../lib/commercial-app-eligibility.ts")));
+const {availableCommercialItems,resumableCommercialOrder,openCheckoutUrl,cancellationApplicationIds}=await import(url(compile("../lib/commercial-app-eligibility.ts")));
 const valid={name:"José",company:"Échantillon Inc.",legalName:"123456 Ontario Inc.",country:"CA",province:"ON",address1:"100 Main St",city:"Windsor",postalCode:"n9a1a1",phone:"+1 (519) 555-0100",contactEmail:"test@example.com"};
 test("valid Canadian profile, local postal normalization and optional fields",()=>{assert.deepEqual(validateCommercialProfile(valid,true),{});assert.equal(normalizeCanadianPostal("n9a1a1"),"N9A 1A1");assert.deepEqual(validateCommercialProfile({...valid,city:"Trois-Rivières",phone:""},true),{});});
 test("reject invalid fields separately and require billing address",()=>{const e=validateCommercialProfile({...valid,phone:"not a phone",city:"3513214354",postalCode:"garbage",address1:"",contactEmail:"x",taxType:"GST"},true);for(const k of ["phone","city","postalCode","address1","contactEmail","taxId"])assert.ok(e[k],k);assert.equal(normalizeCanadianPostal("D9D 1D1"),null);assert.ok(validateCommercialProfile({...valid,city:"Windsor\u200b"},true).city);});
@@ -34,4 +34,66 @@ test("both legal and operating names required; may be identical; personal name m
  assert.equal(legalBillingName(undefined),null);
  assert.equal(legalBillingName(""),null);
  assert.equal(legalBillingName("Test\u200b Inc."),null);
+});
+
+const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,stripeFiscalAddressMatches,paidFiscalReviewRequired,sameHeldPayment,knownStripeAddressConflicts}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
+test("declared billing confirmation binds only to the exact current server snapshot",()=>{
+ const saved={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ assert.equal(confirmedDeclaredTaxAddress(true,{...saved},saved),true);
+ for(const v of [false,undefined,"true",1])assert.equal(confirmedDeclaredTaxAddress(v,saved,saved),false);
+ for(const [key,value] of Object.entries({country:"US",province:"QC",postal:"N9A1A2",city:"London",line1:"101 Main St"}))assert.equal(sameDeclaredTaxAddress({...saved,[key]:value},saved),false);
+ assert.equal(sameDeclaredTaxAddress({...saved,extra:"foreign"},saved),false);
+ assert.equal(sameDeclaredTaxAddress(null,saved),false);
+ assert.equal(sameDeclaredTaxAddress({...saved,line1:""},saved),false);
+});
+
+test("profile fiscal edits require exact confirmed new address including unit; cosmetic formatting does not change identity",()=>{
+ const before={...valid,address2:"Unit 2",country:"Canada",province:"Ontario"};
+ const after={...before,address1:"101 Main St",address2:"Unit 3"};
+ assert.deepEqual(changedFiscalProfileFields(before,{...before,country:"CA",province:"ON",postalCode:"N9A 1A1"}),[]);
+ assert.deepEqual(changedFiscalProfileFields(before,after),["address1","address2"]);
+ assert.equal(confirmedFiscalProfileChange(true,fiscalProfileAddress(after),after),true);
+ assert.equal(confirmedFiscalProfileChange(false,fiscalProfileAddress(after),after),false);
+ assert.equal(confirmedFiscalProfileChange(true,fiscalProfileAddress(before),after),false);
+ assert.equal(confirmedFiscalProfileChange(true,{...fiscalProfileAddress(after),address2:""},after),false);
+});
+test("profile revisions reject missing, stale and different-account tokens",()=>{
+ const token="a".repeat(64),foreign="b".repeat(64);
+ assert.equal(profileRevisionMatches(token,token),true);
+ for(const value of [undefined,null,"",foreign,true])assert.equal(profileRevisionMatches(value,token),false);
+});
+
+test("paid address mismatch is held, including unknown evidence, other province, or changed unit",()=>{
+ const policy={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ const address={country:"CA",state:"Ontario",postal_code:"n9a 1a1",city:"WINDSOR",line1:"100 MAIN ST",line2:"Unit 2"};
+ assert.equal(stripeFiscalAddressMatches(policy,address,"Unit 2"),true);
+ assert.equal(paidFiscalReviewRequired(policy,"Unit 2",address,address),false);
+ for(const bad of [null,{...address,line1:"101 Main St"},{...address,state:"QC"},{...address,country:"US"},{...address,line2:"Unit 3"},{...address,line1:"100 Main Street"}]){
+  assert.equal(paidFiscalReviewRequired(policy,"Unit 2",bad,address),true);
+  assert.equal(paidFiscalReviewRequired(policy,"Unit 2",address,bad),true);
+ }
+ assert.deepEqual(availableCommercialItems([{id:"corporate"},{id:"initiatives"}],[{status:"paid_review_test",applicationIds:["corporate"]}]),[{id:"initiatives"}]);
+});
+test("held payment replay matches immutable payment and cannot resume",()=>{
+ const payment={sessionId:"cs_test_fixture",paymentIntentId:"pi_fixture",subscriptionId:"sub_fixture",amount:57};
+ const order={status:"paid_review_test",stripeSessionId:payment.sessionId,stripePaymentIntentId:payment.paymentIntentId,stripeSubscriptionId:payment.subscriptionId,amount:57,currency:"cad"};
+ assert.equal(sameHeldPayment(order,payment),true);
+ for(const changes of [{amount:58},{paymentIntentId:"pi_other"},{subscriptionId:"sub_other"},{sessionId:"cs_test_other"}])assert.equal(sameHeldPayment(order,{...payment,...changes}),false);
+ assert.equal(resumableCommercialOrder(order,"owner","v1"),false);
+});
+
+test("known Stripe address discrepancies block new/resumed checkout; absent address can be collected",()=>{
+ const policy={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ const address={country:"CA",state:"ON",postal_code:"N9A 1A1",city:"Windsor",line1:"100 Main St"};
+ assert.equal(knownStripeAddressConflicts(policy,"",null),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",{}),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",address),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",{...address,line1:"101 Main St"}),true);
+ assert.equal(knownStripeAddressConflicts(policy,"",{country:"CA"}),true);
+});
+
+test("cancellation requests include held paid subscriptions, not pending or historical one-time purchases",()=>{
+ const orders=[{status:"paid_test",billingMode:"subscription",applicationIds:["corporate"]},{status:"paid_review_test",billingMode:"subscription",applicationIds:["initiatives","corporate"]},{status:"pending_test",billingMode:"subscription",applicationIds:["supply"]},{status:"paid_test",billingMode:"payment",applicationIds:["legacy"]}];
+ assert.deepEqual(cancellationApplicationIds(orders),["corporate","initiatives"]);
+ assert.deepEqual(availableCommercialItems([{id:"corporate"},{id:"initiatives"},{id:"supply"},{id:"other"}],orders),[{id:"other"}]);
 });
