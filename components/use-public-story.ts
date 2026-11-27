@@ -60,7 +60,7 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
   };
   const start=()=>{
    stop();
-   if(motion.matches||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
+   if(motion.matches||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
    running=true;
    root.dataset.storyMode='scroll';
    update();

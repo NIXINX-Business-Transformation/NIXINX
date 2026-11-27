@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import {chromium,webkit} from 'playwright';
 const base='http://127.0.0.1:3100';
 const sizes=[[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[820,1180],[1024,768],[1280,800],[1440,900],[1920,1080]];
-const targets=['.stage-item','.capability','.flow-node','.usecase-grid article'];
 for(const engine of [chromium,webkit]){
  const browser=await engine.launch({headless:true});
  try{
@@ -18,6 +17,8 @@ for(const engine of [chromium,webkit]){
    assert.equal(await page.locator('.site-header .nav-login').count(),1);
    await page.evaluate(()=>{document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,220)});
    await page.waitForFunction(()=>Number(document.querySelector('.public-story').style.getPropertyValue('--nx-hero-progress'))>0);
+   const facade=await page.locator('.hero-facade').evaluate((el,small)=>getComputedStyle(el,small?'::after':null).scale,width<=750);
+   assert.ok(parseFloat(facade)>1,'visible facade depth '+facade);
    const stages=page.locator('.stage-item').first();
    const position=async fraction=>page.evaluate(({fraction})=>{const el=document.querySelector('.stage-item');const y=parseFloat(el.style.getPropertyValue('--nx-story-y'))||0;window.scrollTo(0,window.scrollY+el.getBoundingClientRect().top-y-innerHeight*fraction)},{fraction});
    await position(.9);

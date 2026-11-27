@@ -27,7 +27,15 @@
  }
  @media(max-width:750px){
   .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
-   background-position:center calc(44% + 13% * var(--nx-hero-progress,0));
+   overflow:hidden;
+  }
+  /* Keep the mobile image inside its existing frame; animate only a visual
+     layer, not the box or surrounding text. */
+  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade::after{
+   content:'';position:absolute;inset:0;pointer-events:none;
+   background:inherit;
+   scale:calc(1 + .09 * var(--nx-hero-progress,0));
+   transform-origin:center;
   }
  }
  .public-story[data-story-mode="scroll"] :is(.hero-continuity>div:first-child,.vision>div,.section-heading>div:first-child,.section-heading>p,.stage-item,.capability,.flow-node,.arch-footer,.industry-copy>h2,.industry-list>div,.usecases>h2,.usecase-grid article,.assessment-promo>div,.revenue-grid article,.business-note,.contact>div:first-child>h2):focus-within{translate:none}
