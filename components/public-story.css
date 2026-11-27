@@ -43,17 +43,18 @@
 .public-story .radar .radar-point{--nx-orbit-angle:var(--nx-orbit-end)}
 .public-story .radar .orbit-badge{
  position:absolute;left:-24px;top:-13px;width:48px;height:26px;
- display:grid;place-items:center;border:1px solid #8dc9ba;border-radius:20px;
- background:#e6f6f0;color:#17604e;font-size:11px;font-weight:800;
+ display:grid;place-items:center;
  transform:translateX(var(--nx-orbit-radius)) rotate(calc(-1 * var(--nx-orbit-angle)));
 }
-.public-story .radar .orbit-label{opacity:1}
+.public-story .radar .orbit-badge::before{content:'';position:absolute;inset:0;border:1px solid #8dc9ba;border-radius:20px;background:#e6f6f0;scale:1}
+.public-story .radar .orbit-label{position:relative;color:#17604e;font-size:11px;font-weight:800;opacity:1}
 .public-story .radar[data-story-state="waiting"] .radar-point{--nx-orbit-angle:var(--nx-orbit-start)}
-.public-story .radar[data-story-state="waiting"] .orbit-badge{background:#21bba3;border-color:transparent;scale:.2}
+.public-story .radar[data-story-state="waiting"] .orbit-badge::before{background:#21bba3;border-color:transparent;scale:.19 .35}
 .public-story .radar[data-story-state="waiting"] .orbit-label{opacity:0}
 @media(prefers-reduced-motion:no-preference){
  .public-story[data-story-ready="true"] .radar .radar-point{transition:transform 1550ms cubic-bezier(.25,.6,.35,1)}
- .public-story[data-story-ready="true"] .radar .orbit-badge{transition:transform 1550ms cubic-bezier(.25,.6,.35,1),scale 850ms ease 400ms,background 850ms ease 400ms,border-color 850ms ease 400ms}
+ .public-story[data-story-ready="true"] .radar .orbit-badge{transition:transform 1550ms cubic-bezier(.25,.6,.35,1)}
+ .public-story[data-story-ready="true"] .radar .orbit-badge::before{transition:scale 850ms ease 400ms,background 850ms ease 400ms,border-color 850ms ease 400ms}
  .public-story[data-story-ready="true"] .radar .orbit-label{transition:opacity 450ms ease 800ms}
 }
 @media(prefers-reduced-motion:reduce){.public-story [data-story-axis]{translate:none!important;transition:none!important}}
