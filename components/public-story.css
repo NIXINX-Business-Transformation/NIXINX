@@ -1,55 +1,37 @@
-/* NIXINX public homepage only — additive editorial motion.
-   Preserve the approved hero, navigation, typography, layout and hover effects.
-   All elements are fully visible and static unless an entrance is triggered. */
-.public-story{
- --nx-story-distance:12px;
- --nx-story-duration:600ms;
- --nx-story-ease:cubic-bezier(.22,.61,.36,1);
-}
-/* Retire the original scrubbing on these four groups ONLY on the homepage.
-   The resting appearance is unchanged; the hero's facade is not targeted. */
-.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article):not([data-story-enter]){
- animation:none;
-}
-/* Explicitly reset the previous scroll timeline while an entrance is active. */
-.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article)[data-story-enter]{
- animation-timeline:auto;
- animation-range:normal;
-}
+/* Public homepage only — scroll-linked executive narrative.
+   Original hero, logo, text, controls, palette and geometry preserved. */
+.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article){animation:none}
 @media(prefers-reduced-motion:no-preference){
- .public-story [data-story-enter="true"]{
-  animation:nx-public-enter var(--nx-story-duration) var(--nx-story-ease) both;
-  animation-delay:var(--nx-story-delay,0ms);
+ .public-story[data-story-mode="scroll"] :is(.hero-continuity>div:first-child,.vision>div,.section-heading>div:first-child,.section-heading>p,.stage-item,.capability,.flow-node,.arch-footer,.industry-copy>h2,.industry-list>div,.usecases>h2,.usecase-grid article,.assessment-promo>div,.revenue-grid article,.business-note,.contact>div:first-child>h2){
+  translate:0 var(--nx-story-y,0px);
  }
- .public-story .flow-arrow[data-story-enter="true"]{
-  animation:nx-public-flow 480ms var(--nx-story-ease) both;
-  animation-delay:var(--nx-story-delay,0ms);
+ /* Existing symbols and number accents build the service narrative. */
+ .public-story[data-story-mode="scroll"] .flow-node .flow-symbol,
+ .public-story[data-story-mode="scroll"] .capability .cap-icon,
+ .public-story[data-story-mode="scroll"] .usecase-grid .usecase-icon{
+  scale:calc(.78 + .22 * var(--nx-story-progress,1));
+  transform-origin:left center;
  }
- /* A restrained rhythm across desktop grids. A single column has no delay. */
+ .public-story[data-story-mode="scroll"] .flow-node{
+  border-color:color-mix(in srgb,#83dfc7 calc(100% * (1 - var(--nx-story-progress,1))),#52746b);
+ }
+ .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
+  animation:none;
+ }
+ /* At scroll position zero the approved facade is unchanged. */
  @media(min-width:751px){
-  .public-story :is(.stage-item,.capability,.usecase-grid article,.revenue-grid article):nth-child(2n){--nx-story-delay:65ms}
-  .public-story :is(.stage-item,.capability,.usecase-grid article,.revenue-grid article):nth-child(3n){--nx-story-delay:110ms}
-  .public-story .flow-with-arrow:nth-child(2) :is(.flow-node,.flow-arrow){--nx-story-delay:70ms}
-  .public-story .flow-with-arrow:nth-child(3) :is(.flow-node,.flow-arrow){--nx-story-delay:120ms}
-  .public-story .flow-with-arrow:nth-child(4) .flow-node{--nx-story-delay:160ms}
-  .public-story .vision>div:nth-child(2),.public-story .section-heading>p{--nx-story-delay:80ms}
+  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
+   scale:calc(1 + .09 * var(--nx-hero-progress,0));
+   transform-origin:right center;
+  }
  }
  @media(max-width:750px){
-  .public-story{--nx-story-distance:7px;--nx-story-duration:440ms}
+  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
+   background-position:center calc(44% + 13% * var(--nx-hero-progress,0));
+  }
  }
- /* A keyboard-focused element should never move under the pointer/focus. */
- .public-story [data-story-enter="true"]:focus-within{animation:none}
-}
-/* Individual translate preserves each component's existing transform/hover.
-   Text remains fully opaque at every frame; no horizontal motion on mobile. */
-@keyframes nx-public-enter{
- from{translate:0 var(--nx-story-distance)}
- to{translate:0 0}
-}
-@keyframes nx-public-flow{
- from{translate:-5px 0}
- to{translate:0 0}
+ .public-story[data-story-mode="scroll"] :is(.hero-continuity>div:first-child,.vision>div,.section-heading>div:first-child,.section-heading>p,.stage-item,.capability,.flow-node,.arch-footer,.industry-copy>h2,.industry-list>div,.usecases>h2,.usecase-grid article,.assessment-promo>div,.revenue-grid article,.business-note,.contact>div:first-child>h2):focus-within{translate:none}
 }
 @media(prefers-reduced-motion:reduce){
- .public-story [data-story-enter="true"]{animation:none!important;translate:none!important}
+ .public-story[data-story-mode="scroll"] *{translate:none!important;scale:none!important}
 }
