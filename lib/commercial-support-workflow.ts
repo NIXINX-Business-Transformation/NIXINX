@@ -18,3 +18,14 @@ export function customerView(id:string,r:Record<string,any>,includeReplies=true)
  const replies=(Array.isArray(r.workflowHistory)?r.workflowHistory:[]).filter(e=>e&&typeof e.reply==='string'&&e.reply.length>0);
  return {id,kind:r.kind,subject:r.subject,status:r.status,appId:r.appId??null,date:r.createdAt?.toMillis?.()??null,replyCount:replies.length,...(includeReplies?{replies:replies.map(e=>({date:e.at,text:e.reply}))}:{})};
 }
+
+/** Legacy UX-02 omitted non-cancellation appId even if the form submitted one.
+ * A replay never updates the original record or triggers another notification. */
+export function sameSupportRequest(old:Record<string,any>,incoming:Record<string,any>):boolean{
+ if(old.supportInputVersion!==undefined&&old.supportInputVersion!==2)return false;
+ const legacy=old.supportInputVersion===undefined&&old.kind!=='cancellation';
+ return ['uid','email','kind','subject','description','appId'].every(k=>{
+  if(k==='appId'&&legacy)return old.appId===null;
+  return old[k]===incoming[k];
+ });
+}
