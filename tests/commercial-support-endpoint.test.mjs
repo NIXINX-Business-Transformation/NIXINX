@@ -24,7 +24,7 @@ function harness(){
   const row=rows.get(key),v=row?.value;
   return {exists:!!row,updateTime:row?{seconds:row.rev,nanoseconds:0}:undefined,data:()=>v&&structuredClone(v),get:k=>k.split('.').reduce((a,b)=>a?.[b],v)};
  };
- const ref=(key)=>({key,get:async()=>snapshot(key),collection:name=>collection(key+'/'+name),update:async v=>{if(failAudit)throw Error('audit unavailable');assert.ok(rows.has(key));put(key,{...get(key),...v},rows.get(key).rev+1);writes.push({op:'update',key});}});
+ const ref=(key)=>({key,id:key.split('/').at(-1),get:async()=>snapshot(key),collection:name=>collection(key+'/'+name),update:async v=>{if(failAudit)throw Error('audit unavailable');assert.ok(rows.has(key));put(key,{...get(key),...v},rows.get(key).rev+1);writes.push({op:'update',key});}});
  const collection=(key)=>({doc:(id='history-'+(++serial))=>ref(key+'/'+id),where:(field,op,value)=>({limit:max=>({get:async()=>{
   assert.equal(op,'==');const docs=[...rows.keys()].filter(k=>k.startsWith(key+'/')&&!k.slice(key.length+1).includes('/')&&get(k)?.[field]===value).slice(0,max).map(k=>({...snapshot(k),id:k.slice(key.length+1),ref:ref(k)}));return {docs,empty:!docs.length,size:docs.length};
  }})})});
