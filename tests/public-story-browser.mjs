@@ -24,6 +24,7 @@ try{
    assert.equal(await card.evaluate(el=>getComputedStyle(el).opacity),'1');
    assert.equal(await card.evaluate(el=>el.hasAttribute('data-story-enter')),false);
    await page.emulateMedia({reducedMotion:'reduce'});
+   await page.waitForFunction(()=>document.querySelectorAll('[data-story-enter]').length===0);
    await page.evaluate(()=>window.scrollTo(0,0));
    const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').getBoundingClientRect().height,nav:document.querySelector('.site-header').getBoundingClientRect().height,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,head:document.querySelector('h1').textContent,sections:[...document.querySelectorAll('.public-story > *')].map(e=>e.className),active:document.querySelectorAll('[data-story-enter]').length}));
    assert.equal(end.active,0);

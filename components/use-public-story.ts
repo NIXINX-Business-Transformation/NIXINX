@@ -40,7 +40,7 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
      if(!entry.isIntersecting)continue;
      observer?.unobserve(entry.target);
      // An anchor jump or deep link should not animate a section already visible.
-     if(entry.boundingClientRect.top<0)continue;
+     if(entry.boundingClientRect.top<0||entry.target.matches(':focus-within'))continue;
      active.add(entry.target);
      entry.target.setAttribute('data-story-enter','true');
     }

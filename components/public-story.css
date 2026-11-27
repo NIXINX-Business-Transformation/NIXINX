@@ -8,8 +8,13 @@
 }
 /* Retire the original scrubbing on these four groups ONLY on the homepage.
    The resting appearance is unchanged; the hero's facade is not targeted. */
-.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article){
+.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article):not([data-story-enter]){
  animation:none;
+}
+/* Explicitly reset the previous scroll timeline while an entrance is active. */
+.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article)[data-story-enter]{
+ animation-timeline:auto;
+ animation-range:normal;
 }
 @media(prefers-reduced-motion:no-preference){
  .public-story [data-story-enter="true"]{
