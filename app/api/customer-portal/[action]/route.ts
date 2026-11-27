@@ -13,6 +13,8 @@ import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress,knownStripeAddressConflicts} from '@/lib/commercial-billing-address';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
 import {notifySupportRequest} from '@/lib/commercial-support-notification';
+import {customerView,kinds,validRef} from '@/lib/commercial-support-workflow';
+import {staffSupport} from '@/lib/commercial-support-admin';
 import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -108,10 +110,10 @@ async function webhook(req:NextRequest){
 type Ctx={params:Promise<{action:string}>};
 export async function GET(req:NextRequest,{params}:Ctx){
  try{const action=(await params).action;if(action==='auth-config'){const key=process.env.CUSTOMER_FIREBASE_WEB_API_KEY,projectId=process.env.FIREBASE_PROJECT_ID;if(!key||projectId!=='nixinx-bt')return fail('NOT_CONFIGURED',503);return result({apiKey:key,projectId,authDomain:projectId+'.firebaseapp.com'});}if(action!=='account')return fail('NOT_FOUND',404);const u=await user(req);if(!u)return fail('LOGIN_REQUIRED',401);
- const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
+ const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).orderBy('__name__').limit(101).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
  const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),billingMode:d.get('billingMode')??'payment',subscriptionId:d.get('stripeSubscriptionId')??null,applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
- return result({email:u.email,profileRevision:profileRevision(u.uid,p),communication:{email:p.get('communication.email')===true,sms:p.get('communication.sms')===true},profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
+ return result({email:u.email,profileRevision:profileRevision(u.uid,p),communication:{email:p.get('communication.email')===true,sms:p.get('communication.sms')===true},profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.slice(0,100).map(d=>customerView(d.id,d.data())),ticketCursor:tickets.size>100?tickets.docs[99].id:null});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
 const syncOrigin='https://controlde.nixinx.org';
@@ -181,7 +183,7 @@ async function financialLookup(req:NextRequest){
 }
 export async function POST(req:NextRequest,{params}:Ctx){
  try{
- const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);if(action==='financial-lookup')return await financialLookup(req);
+ const {action}=await params;if(action==='stripe-webhook')return await webhook(req);if(action==='catalog-sync')return await sync(req);if(action==='financial-lookup')return await financialLookup(req);if(action==='staff-support')return await staffSupport(req,service().db);
  if(req.headers.get('origin')!==origin()||req.nextUrl.origin!==origin())return fail('INVALID_ORIGIN',403);
  const raw=await req.text();if(raw.length>(action==='profile'?150000:10000))return fail('REQUEST_TOO_LARGE',413);const body=JSON.parse(raw||'{}');
  if(action==='google-login'){
@@ -284,17 +286,26 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const customer=await billingCustomer(db,u.uid,profile,stripe);
   return result({url:await hostedBilling(stripe,customer,origin()+'/'+locale+'/account?section=billing')});
  }
- if(action==='support'){
+ if(action==='support-history'){
+   if(!validRef(body.cursor))return fail('INVALID_REQUEST');
+   const col=db.collection('commercial_support_requests'),cursor=await col.doc(body.cursor).get();
+   if(!cursor.exists||cursor.get('uid')!==u.uid)return fail('NOT_FOUND',404);
+   const rows=await col.where('uid','==',u.uid).orderBy('__name__').startAfter(cursor).limit(101).get();
+   return result({tickets:rows.docs.slice(0,100).map(d=>customerView(d.id,d.data())),ticketCursor:rows.size>100?rows.docs[99].id:null});
+  }
+  if(action==='support'){
   const kind=str(body.kind),subject=str(body.subject),description=str(body.description),appId=str(body.appId);
-  if(!['support','claim','cancellation'].includes(kind)||subject.length<3||subject.length>160||description.length<5||description.length>2000)return fail('INVALID_REQUEST');
-  if(kind==='cancellation'){
-   const orders=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
-   if(orders.size>500||!cancellationApplicationIds(orders.docs.map(d=>({status:d.get('status'),billingMode:d.get('billingMode'),applicationIds:d.get('applicationIds')}))).includes(appId))return fail('APPLICATION_NOT_CONTRACTED',409);
+  if(!kinds.includes(kind)||subject.length<3||subject.length>160||description.length<5||description.length>2000)return fail('INVALID_REQUEST');
+  if(kind==='cancellation'||appId){
+    const orders=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
+   const owned=orders.docs.map(d=>({status:d.get('status'),billingMode:d.get('billingMode'),applicationIds:d.get('applicationIds')}));
+    const allowed=kind==='cancellation'?cancellationApplicationIds(owned):owned.filter(o=>isConfirmedCommercialPayment(o.status)).flatMap(o=>Array.isArray(o.applicationIds)?o.applicationIds:[]);
+    if(orders.size>500||!allowed.includes(appId))return fail('APPLICATION_NOT_CONTRACTED',409);
   }
   const requestId=str(body.requestId);
   if(!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(requestId))return fail('SUPPORT_REFRESH_REQUIRED',409);
   const ref=db.collection('commercial_support_requests').doc(createHash('sha256').update(JSON.stringify([u.uid,requestId])).digest('hex'));
-  const request={uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null};
+  const request={uid:u.uid,email:u.email,kind,subject,description,appId:appId||null};
   const created=await db.runTransaction(async tx=>{
    const old=await tx.get(ref);
    if(old.exists){if(Object.entries(request).some(([k,v])=>old.get(k)!==v))throw Error('SUPPORT_REQUEST_CONFLICT');return false;}
