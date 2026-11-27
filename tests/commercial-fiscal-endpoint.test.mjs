@@ -59,7 +59,8 @@ function harness(){
   assert.equal(opts.method,'GET','no Stripe writes permitted');
   const key=url.slice(p.length);requests.push(key);
   assert.ok(stripeFixtures[key],'unexpected Stripe path '+key);
-  return {ok:true,json:async()=>structuredClone(stripeFixtures[key])};
+  const fixture=stripeFixtures[key];if(fixture.__httpStatus)return {ok:false,status:fixture.__httpStatus,json:async()=>({error:{message:'fixture internal detail'}})};
+  return {ok:true,json:async()=>structuredClone(fixture)};
  };
  const mocks={
   'next/server':{NextResponse:{json:(body,opts)=>({body,status:opts.status,headers:opts.headers})}},
@@ -242,4 +243,12 @@ test('customer invoice adjustments: reject mismatched note, refund and billing o
 test('customer invoice adjustments: rejects external PDF link; preserves note/refund states',async()=>{
  const h=harness(),note=creditFixture(h);note.pdf='https://pay.stripe.com.invalid/credit_notes/a';note.refund.status='pending';
  const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,200);assert.equal(r.body.notes[0].pdf,null);assert.equal(r.body.notes[0].refund.status,'pending');assert.equal(h.writes.length,0);
+});
+
+test('invoice adjustment diagnostics: denied Stripe read returns safe code without mutations or upstream details',async()=>{
+ const h=harness();creditFixture(h);h.stripeFixtures['credit_notes?invoice=in_renewal&customer=cus_fixture&limit=100&expand%5B%5D=data.refund']={__httpStatus:403};
+ const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,503);assert.deepEqual(r.body,{error:'INVOICE_ADJUSTMENTS_UNAVAILABLE',diagnostic:'NX-ADJ-READ-PERMISSION'});assert.equal(h.writes.length,0);assert.equal(h.requests.length,3);
+});
+test('invoice adjustment diagnostics: invalid provider binding remains fail closed',async()=>{
+ const h=harness(),note=creditFixture(h);note.customer='cus_other';const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,409);assert.equal(r.body.diagnostic,'NX-ADJ-BINDING');assert.equal(r.body.notes,undefined);assert.equal(h.writes.length,0);
 });
