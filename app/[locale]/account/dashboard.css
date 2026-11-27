@@ -10,3 +10,12 @@
 .nx-consent{display:grid;gap:12px;margin-top:16px}.nx-consent details{border:1px solid var(--nx-border);border-radius:10px;padding:14px;overflow-wrap:anywhere}.nx-consent summary{cursor:pointer;font-weight:650}.nx-consent label{display:flex;gap:10px;align-items:flex-start;font-size:14px}.nx-consent input[type=checkbox]{flex:none;width:18px;height:18px;accent-color:#299b82;margin-top:3px}
 
 .nx-dash [aria-invalid=true]{border-color:#c64b52!important;outline-color:#c64b52}.nx-field-error{color:#b4232b;font-weight:500;overflow-wrap:anywhere}.nx-dash[data-theme=dark] .nx-field-error{color:#ffb0b4}@media(prefers-color-scheme:dark){.nx-dash[data-theme=system] .nx-field-error{color:#ffb0b4}}
+
+/* Portal polish: keep fiscal confirmation readable and controls inside narrow layouts. */
+.nx-fiscal-notice{display:grid;gap:10px;margin-top:14px;align-items:start}
+.nx-fiscal-notice p{margin:0}.nx-fiscal-notice label{max-width:100%;overflow-wrap:anywhere}.nx-fiscal-notice input[type=checkbox]{flex:none;accent-color:#299b82;width:18px;height:18px}
+.nx-stripe-panel .nx-stripe-details{font-size:13px;color:inherit}
+.nx-record>*,.nx-tools>*,.nx-photo-row>*{min-width:0;max-width:100%}
+.nx-tools{flex-wrap:wrap}.nx-tools>select{width:auto}.nx-tools label select{width:auto;max-width:100%}
+.nx-form input[type=file]{max-width:100%;overflow:hidden}
+@media(max-width:650px){.nx-tools{gap:10px;max-width:100%}.nx-sidebar nav button,.nx-primary,.nx-secondary,.nx-stripe-button{min-height:44px}.nx-photo-row label{min-width:0;flex-basis:100%}.nx-checkout>button{width:100%}.nx-fiscal-notice{padding:12px}.nx-record>div{max-width:100%;overflow-wrap:anywhere}}

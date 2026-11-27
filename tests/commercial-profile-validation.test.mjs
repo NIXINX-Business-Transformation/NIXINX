@@ -6,7 +6,7 @@ const compile=(p)=>ts.transpileModule(fs.readFileSync(new URL(p,import.meta.url)
 const url=(s)=>"data:text/javascript;base64,"+Buffer.from(s).toString("base64");
 const geo=url(compile("../lib/commercial-geography.ts"));
 const {validateCommercialProfile,normalizeCanadianPostal,legalBillingName}=await import(url(compile("../lib/commercial-profile-validation.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
-const {availableCommercialItems,resumableCommercialOrder,openCheckoutUrl}=await import(url(compile("../lib/commercial-app-eligibility.ts")));
+const {availableCommercialItems,resumableCommercialOrder,openCheckoutUrl,cancellationApplicationIds}=await import(url(compile("../lib/commercial-app-eligibility.ts")));
 const valid={name:"José",company:"Échantillon Inc.",legalName:"123456 Ontario Inc.",country:"CA",province:"ON",address1:"100 Main St",city:"Windsor",postalCode:"n9a1a1",phone:"+1 (519) 555-0100",contactEmail:"test@example.com"};
 test("valid Canadian profile, local postal normalization and optional fields",()=>{assert.deepEqual(validateCommercialProfile(valid,true),{});assert.equal(normalizeCanadianPostal("n9a1a1"),"N9A 1A1");assert.deepEqual(validateCommercialProfile({...valid,city:"Trois-Rivières",phone:""},true),{});});
 test("reject invalid fields separately and require billing address",()=>{const e=validateCommercialProfile({...valid,phone:"not a phone",city:"3513214354",postalCode:"garbage",address1:"",contactEmail:"x",taxType:"GST"},true);for(const k of ["phone","city","postalCode","address1","contactEmail","taxId"])assert.ok(e[k],k);assert.equal(normalizeCanadianPostal("D9D 1D1"),null);assert.ok(validateCommercialProfile({...valid,city:"Windsor\u200b"},true).city);});
@@ -90,4 +90,10 @@ test("known Stripe address discrepancies block new/resumed checkout; absent addr
  assert.equal(knownStripeAddressConflicts(policy,"",address),false);
  assert.equal(knownStripeAddressConflicts(policy,"",{...address,line1:"101 Main St"}),true);
  assert.equal(knownStripeAddressConflicts(policy,"",{country:"CA"}),true);
+});
+
+test("cancellation requests include held paid subscriptions, not pending or historical one-time purchases",()=>{
+ const orders=[{status:"paid_test",billingMode:"subscription",applicationIds:["corporate"]},{status:"paid_review_test",billingMode:"subscription",applicationIds:["initiatives","corporate"]},{status:"pending_test",billingMode:"subscription",applicationIds:["supply"]},{status:"paid_test",billingMode:"payment",applicationIds:["legacy"]}];
+ assert.deepEqual(cancellationApplicationIds(orders),["corporate","initiatives"]);
+ assert.deepEqual(availableCommercialItems([{id:"corporate"},{id:"initiatives"},{id:"supply"},{id:"other"}],orders),[{id:"other"}]);
 });

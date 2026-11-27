@@ -7,7 +7,7 @@ import { commercialCatalog, reconcileStripe } from '@/lib/commercial-stripe-cata
 import { billingCustomer, hostedBilling, billingSubscriptions } from '@/lib/customer-billing';
 import { recordBillingEvent } from '@/lib/commercial-billing-events';
 import {validateCommercialProfile,profileLimits,normalizeCanadianPostal,legalBillingName} from '@/lib/commercial-profile-validation';
-import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl,isConfirmedCommercialPayment} from '@/lib/commercial-app-eligibility';
+import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl,isConfirmedCommercialPayment,cancellationApplicationIds} from '@/lib/commercial-app-eligibility';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress,knownStripeAddressConflicts} from '@/lib/commercial-billing-address';
@@ -288,7 +288,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   if(!['support','claim','cancellation'].includes(kind)||subject.length<3||subject.length>160||description.length<5||description.length>2000)return fail('INVALID_REQUEST');
   if(kind==='cancellation'){
    const orders=await db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get();
-   if(orders.size>500||!orders.docs.some(d=>d.get('status')==='paid_test'&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').includes(appId)))return fail('APPLICATION_NOT_CONTRACTED',409);
+   if(orders.size>500||!cancellationApplicationIds(orders.docs.map(d=>({status:d.get('status'),billingMode:d.get('billingMode'),applicationIds:d.get('applicationIds')}))).includes(appId))return fail('APPLICATION_NOT_CONTRACTED',409);
   }
   const ref=db.collection('commercial_support_requests').doc();
   await ref.create({uid:u.uid,email:u.email,kind,subject,description,appId:kind==='cancellation'?appId:null,status:'OPEN',createdAt:FieldValue.serverTimestamp()});
