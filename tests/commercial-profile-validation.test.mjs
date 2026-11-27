@@ -35,3 +35,14 @@ test("both legal and operating names required; may be identical; personal name m
  assert.equal(legalBillingName(""),null);
  assert.equal(legalBillingName("Test\u200b Inc."),null);
 });
+
+const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress}=await import(url(compile("../lib/commercial-billing-address.ts")));
+test("declared billing confirmation binds only to the exact current server snapshot",()=>{
+ const saved={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ assert.equal(confirmedDeclaredTaxAddress(true,{...saved},saved),true);
+ for(const v of [false,undefined,"true",1])assert.equal(confirmedDeclaredTaxAddress(v,saved,saved),false);
+ for(const [key,value] of Object.entries({country:"US",province:"QC",postal:"N9A1A2",city:"London",line1:"101 Main St"}))assert.equal(sameDeclaredTaxAddress({...saved,[key]:value},saved),false);
+ assert.equal(sameDeclaredTaxAddress({...saved,extra:"foreign"},saved),false);
+ assert.equal(sameDeclaredTaxAddress(null,saved),false);
+ assert.equal(sameDeclaredTaxAddress({...saved,line1:""},saved),false);
+});
