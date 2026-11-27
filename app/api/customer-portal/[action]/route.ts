@@ -37,12 +37,16 @@ async function firebase(action:string,body:object){
  const res=await fetch('https://identitytoolkit.googleapis.com/v1/accounts:'+action+'?key='+encodeURIComponent(key),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
  if(!res.ok)throw Error('AUTH_FAILED');return res.json();
 }
-async function stripe(path:string,form?:URLSearchParams,idempotency?:string){
+async function stripe(path:string,form?:URLSearchParams,idempotency?:string,onHttpError?:(status:number)=>void){
  const key=process.env.STRIPE_COMMERCIAL_SECRET_KEY;if(!key?.startsWith('rk_test_'))throw Error('SANDBOX_NOT_CONFIGURED');
  const headers:Record<string,string>={Authorization:'Bearer '+key,'Stripe-Version':'2024-06-20'};
  if(form)headers['Content-Type']='application/x-www-form-urlencoded';if(idempotency)headers['Idempotency-Key']=idempotency;
  const res=await fetch('https://api.stripe.com/v1/'+path,{method:form?'POST':'GET',headers,body:form,cache:'no-store',signal:AbortSignal.timeout(15000)});
- if(!res.ok)throw Error('STRIPE_UNAVAILABLE');const obj=await res.json();if(obj.object==='list'?(!Array.isArray(obj.data)||obj.data.some((v:{livemode?:boolean})=>v.livemode!==false)):obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
+ if(!res.ok){onHttpError?.(res.status);throw Error('STRIPE_UNAVAILABLE');}const obj=await res.json();
+ // Refund objects in the pinned API omit livemode. Only allow an exact
+ // GET refund object on the sandbox key; invoiceAdjustments checks its PI.
+ if(!form&&onHttpError&&/^refunds\/re_[A-Za-z0-9_]+$/.test(path)&&obj.object==='refund'&&obj.id===path.slice('refunds/'.length)){if(obj.livemode!==undefined&&obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;}
+ if(obj.object==='list'?(!Array.isArray(obj.data)||obj.data.some((v:{livemode?:boolean})=>v.livemode!==false)):obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
 }
 const catalog=commercialCatalog;
 function signature(raw:string,header:string){
@@ -269,7 +273,21 @@ export async function POST(req:NextRequest,{params}:Ctx){
  }
  if(action==='invoice-adjustments'){
   const invoiceId=str(body.invoiceId);if(!/^in_[A-Za-z0-9]+$/.test(invoiceId)||invoiceId.length>100)return fail('INVALID_INVOICE');
-  return result(await invoiceAdjustments(db,u.uid,invoiceId,stripe));
+  let stage='ownership',upstreamStatus:number|null=null;
+  try{
+   return result(await invoiceAdjustments(db,u.uid,invoiceId,async path=>{
+    stage=path.startsWith('customers/')?'customer':path.startsWith('invoices/')?'invoice':path.startsWith('credit_notes?')?'credit-notes':path.startsWith('refunds/')?'refund':'unexpected';
+    return stripe(path,undefined,undefined,status=>{upstreamStatus=status;});
+   }));
+  }catch(e){
+   const code=e instanceof Error?e.message:'';
+   const allowed=['INVOICE_NOT_FOUND','BILLING_BINDING_INVALID','BILLING_RECONCILIATION_REQUIRED','BILLING_HISTORY_LIMIT','SANDBOX_NOT_CONFIGURED','STRIPE_UNAVAILABLE','LIVE_REJECTED'];
+   const reason=allowed.includes(code)?code:'UNEXPECTED';
+   // Do not record UID, invoice ID, request bodies, upstream responses or credentials.
+   if(reason!=='INVOICE_NOT_FOUND')console.warn('commercial.invoice_adjustments',JSON.stringify({stage,reason,upstreamStatus}));
+   const diagnostic=upstreamStatus===403?'NX-ADJ-READ-PERMISSION':upstreamStatus===401?'NX-ADJ-AUTH':upstreamStatus===400?'NX-ADJ-UPSTREAM-REQUEST':reason==='INVOICE_NOT_FOUND'?'NX-ADJ-NOT-FOUND':reason==='BILLING_BINDING_INVALID'?'NX-ADJ-BINDING':reason==='BILLING_RECONCILIATION_REQUIRED'?'NX-ADJ-RECONCILIATION':reason==='BILLING_HISTORY_LIMIT'?'NX-ADJ-HISTORY':reason==='LIVE_REJECTED'||reason==='SANDBOX_NOT_CONFIGURED'?'NX-ADJ-ENVIRONMENT':'NX-ADJ-UNAVAILABLE';
+   return result({error:reason==='INVOICE_NOT_FOUND'?'INVOICE_NOT_FOUND':'INVOICE_ADJUSTMENTS_UNAVAILABLE',diagnostic},reason==='INVOICE_NOT_FOUND'?404:reason==='BILLING_BINDING_INVALID'||reason==='BILLING_RECONCILIATION_REQUIRED'||reason==='BILLING_HISTORY_LIMIT'?409:503);
+  }
  }
  if(action==='notification-read'){
   const id=str(body.id);if(!/^evt_[A-Za-z0-9_]+$/.test(id))return fail('INVALID_NOTIFICATION');
