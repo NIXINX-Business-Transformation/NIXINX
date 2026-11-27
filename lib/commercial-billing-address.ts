@@ -44,3 +44,11 @@ export function paidFiscalReviewRequired(policy:unknown,line2:unknown,sessionAdd
 export function sameHeldPayment(order:Record<string,unknown>,payment:{sessionId:string;paymentIntentId:string;subscriptionId:string|null;amount:number}){
  return order.status==="paid_review_test"&&order.stripeSessionId===payment.sessionId&&order.stripePaymentIntentId===payment.paymentIntentId&&order.stripeSubscriptionId===payment.subscriptionId&&order.amount===payment.amount&&order.currency==="cad";
 }
+
+export function knownStripeAddressConflicts(policy:unknown,line2:unknown,address:unknown){
+ if(address===null||address===undefined)return false;
+ if(typeof address!=="object"||Array.isArray(address))return true;
+ const a=address as Record<string,unknown>;
+ const present=["line1","line2","city","state","postal_code","country"].some(k=>a[k]!==null&&a[k]!==undefined&&a[k]!=="");
+ return present&&!stripeFiscalAddressMatches(policy,a,line2);
+}

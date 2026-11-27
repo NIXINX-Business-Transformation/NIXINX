@@ -36,7 +36,7 @@ test("both legal and operating names required; may be identical; personal name m
  assert.equal(legalBillingName("Test\u200b Inc."),null);
 });
 
-const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,stripeFiscalAddressMatches,paidFiscalReviewRequired,sameHeldPayment}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
+const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,stripeFiscalAddressMatches,paidFiscalReviewRequired,sameHeldPayment,knownStripeAddressConflicts}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
 test("declared billing confirmation binds only to the exact current server snapshot",()=>{
  const saved={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
  assert.equal(confirmedDeclaredTaxAddress(true,{...saved},saved),true);
@@ -80,4 +80,14 @@ test("held payment replay matches immutable payment and cannot resume",()=>{
  assert.equal(sameHeldPayment(order,payment),true);
  for(const changes of [{amount:58},{paymentIntentId:"pi_other"},{subscriptionId:"sub_other"},{sessionId:"cs_test_other"}])assert.equal(sameHeldPayment(order,{...payment,...changes}),false);
  assert.equal(resumableCommercialOrder(order,"owner","v1"),false);
+});
+
+test("known Stripe address discrepancies block new/resumed checkout; absent address can be collected",()=>{
+ const policy={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
+ const address={country:"CA",state:"ON",postal_code:"N9A 1A1",city:"Windsor",line1:"100 Main St"};
+ assert.equal(knownStripeAddressConflicts(policy,"",null),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",{}),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",address),false);
+ assert.equal(knownStripeAddressConflicts(policy,"",{...address,line1:"101 Main St"}),true);
+ assert.equal(knownStripeAddressConflicts(policy,"",{country:"CA"}),true);
 });

@@ -10,7 +10,7 @@ import {validateCommercialProfile,profileLimits,normalizeCanadianPostal,legalBil
 import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl,isConfirmedCommercialPayment} from '@/lib/commercial-app-eligibility';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
-import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress} from '@/lib/commercial-billing-address';
+import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress,knownStripeAddressConflicts} from '@/lib/commercial-billing-address';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
 import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
@@ -50,6 +50,13 @@ function signature(raw:string,header:string){
  const hash=createHmac('sha256',secret).update(t+'.'+raw).digest();
  return pairs.some(p=>p[0]==='v1'&&/^[a-f0-9]{64}$/.test(p[1]||'')&&timingSafeEqual(hash,Buffer.from(p[1],'hex')));
 }
+async function verifyKnownCheckoutAddress(db:FirebaseFirestore.Firestore,uid:string,customer:string,policy:unknown,line2:unknown){
+ const binding=await db.collection('commercial_billing_customers').doc(uid).get();
+ if(binding.get('uid')!==uid||binding.get('environment')!=='sandbox'||binding.get('stripeCustomerId')!==customer||!/^cus_[A-Za-z0-9]+$/.test(customer))throw Error('BILLING_BINDING_INVALID');
+ const c=await stripe('customers/'+encodeURIComponent(customer));
+ if(c.deleted||c.id!==customer||c.metadata?.nixinx_owner!=='nixinx-commercial-sandbox-v1'||c.metadata?.nixinx_uid_hash!==createHash('sha256').update(uid).digest('hex'))throw Error('BILLING_BINDING_INVALID');
+ if(knownStripeAddressConflicts(policy,line2,c.address))throw Error('BILLING_ADDRESS_REVIEW_REQUIRED');
+}
 async function webhook(req:NextRequest){
  const raw=await req.text();if(raw.length>1000000||!signature(raw,req.headers.get('stripe-signature')||''))return fail('INVALID_SIGNATURE');
  const event=JSON.parse(raw);if(event.livemode!==false)return fail('LIVE_REJECTED');
@@ -68,7 +75,7 @@ async function webhook(req:NextRequest){
   if(existingOrder.get('stripeSessionId')!==id||existingOut.get('payment.checkoutSessionId')!==id||s.metadata?.orderId!==orderId)return fail('ORDER_MISMATCH',409);
   return result({received:true});
  }
- let subscriptionId:string|null=null,paymentIntentId=s.payment_intent,invoiceAddress:unknown=null;
+ let subscriptionId:string|null=null,paymentIntentId=s.payment_intent,invoiceAddress:unknown=null,initialInvoiceId:string|null=null;
  if(s.mode==='subscription'){
   const sub=await stripe('subscriptions/'+encodeURIComponent(s.subscription));
   if(sub.customer!==s.customer||sub.metadata?.orderId!==orderId||typeof sub.id!=='string')return fail('PAYMENT_MISMATCH',409);
@@ -77,7 +84,7 @@ async function webhook(req:NextRequest){
   if(invoices.has_more||initial.length!==1)return fail('PAYMENT_MISMATCH',409);
   const invoice=initial[0];
   if(invoice.status!=='paid'||invoice.billing_reason!=='subscription_create'||invoice.customer!==s.customer||invoice.subscription!==sub.id||invoice.amount_paid!==s.amount_total||invoice.currency!=='cad'||typeof invoice.payment_intent!=='string')return fail('PAYMENT_MISMATCH',409);
-  subscriptionId=sub.id;paymentIntentId=invoice.payment_intent;invoiceAddress=invoice.customer_address;
+  subscriptionId=sub.id;paymentIntentId=invoice.payment_intent;invoiceAddress=invoice.customer_address;initialInvoiceId=invoice.id;
  }
  await db.runTransaction(async tx=>{
   const [old,prior]=await Promise.all([tx.get(ref),tx.get(out)]);const order=old.data();
@@ -89,7 +96,7 @@ async function webhook(req:NextRequest){
   }
   if(order.status!=='pending_test')throw Error('ORDER_MISMATCH');
   if(subscriptionId&&paidFiscalReviewRequired(order.taxPolicy,order.declaredFiscalLine2,s.customer_details?.address,invoiceAddress)){
-   tx.update(ref,{status:'paid_review_test',stripeSubscriptionId:subscriptionId,stripePaymentIntentId:paymentIntentId,amount:s.amount_total,taxAmount:s.total_details.amount_tax,paidAt:FieldValue.serverTimestamp(),fiscalReview:{status:'PENDING',reason:'BILLING_ADDRESS_MISMATCH_OR_UNVERIFIED',eventId:event.id,createdAt:FieldValue.serverTimestamp()}});
+   tx.update(ref,{status:'paid_review_test',stripeSubscriptionId:subscriptionId,stripePaymentIntentId:paymentIntentId,stripeInvoiceId:initialInvoiceId,amount:s.amount_total,taxAmount:s.total_details.amount_tax,paidAt:FieldValue.serverTimestamp(),fiscalReview:{status:'PENDING',reason:'BILLING_ADDRESS_MISMATCH_OR_UNVERIFIED',eventId:event.id,createdAt:FieldValue.serverTimestamp()}});
    return;
   }
   tx.update(ref,{status:'paid_test',...(subscriptionId?{stripeSubscriptionId:subscriptionId,amount:s.amount_total,taxAmount:s.total_details.amount_tax}:{}),paidAt:FieldValue.serverTimestamp()});
@@ -293,6 +300,9 @@ export async function POST(req:NextRequest,{params}:Ctx){
   const order=(await db.collection('commercial_orders').doc(orderId).get()).data();
   if(!order||order.uid!==u.uid)return fail('ORDER_NOT_FOUND',404);
   if(!resumableCommercialOrder(order,u.uid,CONSENT_VERSION))return fail('ORDER_REQUIRES_REVIEW',409);
+  const current=(await p.get()).data();
+  if(!current||!sameDeclaredTaxAddress(order.taxPolicy,commercialTaxPolicy(current))||(order.declaredFiscalLine2??'')!==fiscalProfileAddress(current).address2)return fail('ORDER_REQUIRES_REVIEW',409);
+  await verifyKnownCheckoutAddress(db,u.uid,order.stripeCustomerId,order.taxPolicy,order.declaredFiscalLine2??'');
   // A reserved order is never added to a new cart. Resume only the existing
   // authenticated Stripe session; missing/expired sessions require reconciliation.
   const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));
@@ -307,7 +317,9 @@ export async function POST(req:NextRequest,{params}:Ctx){
   if(selected.length!==body.applicationIds.length)return fail('CATALOG_UNAVAILABLE',503);
   const subtotal=selected.reduce((sum,item)=>sum+item.amount,0);
   const applicationIds=selected.map(i=>i.id).sort();
-  const profile=(await p.get()).data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  const profileSnap=await p.get(),profile=profileSnap.data();if(!profile)return fail('PROFILE_REQUIRED',409);
+  const revision=profileRevision(u.uid,profileSnap);
+  if(!profileRevisionMatches(body.profileRevision,revision))return fail('PROFILE_REVISION_REQUIRED',409);
   const errors=validateCommercialProfile(profile,true);const billingLegalName=legalBillingName(profile.legalName);
   if(Object.keys(errors).length||!billingLegalName)return result({error:'PROFILE_REQUIRED',fields:errors},409);
   const taxPolicy=commercialTaxPolicy(profile),declaredFiscalLine2=fiscalProfileAddress(profile).address2;if(!taxPolicy)return fail('TAX_JURISDICTION_NOT_CONFIGURED',409);
@@ -316,19 +328,21 @@ export async function POST(req:NextRequest,{params}:Ctx){
    if(previous.size>500)return fail('BILLING_RECONCILIATION_REQUIRED',409);
    const reserved=reservedApplicationIds(previous.docs.map(d=>({status:d.get('status'),applicationIds:d.get('applicationIds')})));
    if(applicationIds.some(id=>reserved.has(id)))return fail('APPLICATION_ALREADY_ORDERED',409);
-   return result({...await quoteTax(stripe,taxPolicy,selected),taxPolicy,declaredFiscalLine2});
+   return result({...await quoteTax(stripe,taxPolicy,selected,declaredFiscalLine2),taxPolicy,declaredFiscalLine2,profileRevision:revision});
   }
   if(body.termsAccepted!==true||body.termsVersion!==CONSENT_VERSION)return fail('TERMS_REQUIRED',409);
   if(!confirmedDeclaredTaxAddress(body.billingAddressConfirmed,body.confirmedTaxPolicy,taxPolicy)||body.confirmedFiscalLine2!==declaredFiscalLine2)return fail('BILLING_ADDRESS_CONFIRMATION_REQUIRED',409);
   const customer=await billingCustomer(db,u.uid,profile,stripe,true);
+  await verifyKnownCheckoutAddress(db,u.uid,customer,taxPolicy,declaredFiscalLine2);
   const orderId=createHash('sha256').update('sandbox-v1:'+u.uid+':'+applicationIds.join(',')).digest('hex'),ref=db.collection('commercial_orders').doc(orderId);
-  const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const [old,currentProfile]=await Promise.all([tx.get(ref),tx.get(p)]);if(!sameDeclaredTaxAddress(commercialTaxPolicy(currentProfile.data()??null),taxPolicy)||fiscalProfileAddress(currentProfile.data()).address2!==declaredFiscalLine2)throw Error('BILLING_ADDRESS_CONFIRMATION_REQUIRED');if(old.exists){const existing=old.data()!;if(existing.status==='pending_test'&&existing.terms?.version!==CONSENT_VERSION)throw Error('ORDER_REQUIRES_REVIEW');return existing;}
+  const order=await db.runTransaction<FirebaseFirestore.DocumentData>(async tx=>{const [old,currentProfile]=await Promise.all([tx.get(ref),tx.get(p)]);if(!profileRevisionMatches(revision,profileRevision(u.uid,currentProfile))||!sameDeclaredTaxAddress(commercialTaxPolicy(currentProfile.data()??null),taxPolicy)||fiscalProfileAddress(currentProfile.data()).address2!==declaredFiscalLine2)throw Error('BILLING_ADDRESS_CONFIRMATION_REQUIRED');if(old.exists){const existing=old.data()!;if(existing.status==='pending_test'&&existing.terms?.version!==CONSENT_VERSION)throw Error('ORDER_REQUIRES_REVIEW');return existing;}
    const previous=await tx.get(db.collection('commercial_orders').where('uid','==',u.uid).limit(501));
    if(previous.size>500||previous.docs.some(d=>['paid_test','pending_test','paid_review_test'].includes(d.get('status'))&&Array.isArray(d.get('applicationIds'))&&d.get('applicationIds').some((id:string)=>applicationIds.includes(id))))throw Error('APPLICATION_ALREADY_ORDERED');
    const customerSnapshot={name:profile.name,company:profile.company,acronym:profile.acronym,email:u.email};
    const value={terms:{version:CONSENT_VERSION,locale,acceptedBy:u.uid,acceptedAt:FieldValue.serverTimestamp()},billingMode:'subscription',uid:u.uid,profile:customerSnapshot,billingLegalName,stripeCustomerId:customer,applicationIds,subtotal,taxPolicy,declaredFiscalLine2,currency:'cad',priceIds:selected.map(i=>i.priceId),status:'pending_test',createdAt:FieldValue.serverTimestamp()};tx.create(ref,value);return value;
   });
   if(order.status!=='pending_test')return fail('ORDER_ALREADY_PAID',409);
+  if(!sameDeclaredTaxAddress(order.taxPolicy,taxPolicy)||(order.declaredFiscalLine2??'')!==declaredFiscalLine2)return fail('ORDER_REQUIRES_REVIEW',409);
   if(order.stripeSessionId){if(!resumableCommercialOrder(order,u.uid,CONSENT_VERSION))return fail('ORDER_REQUIRES_REVIEW',409);const s=await stripe('checkout/sessions/'+encodeURIComponent(order.stripeSessionId));const url=openCheckoutUrl(s,order,orderId);return url?result({url}):fail('ORDER_REQUIRES_REVIEW',409);}
   if(!sameDeclaredTaxAddress(order.taxPolicy,taxPolicy)||(order.declaredFiscalLine2??'')!==declaredFiscalLine2||order.billingLegalName!==billingLegalName||order.stripeCustomerId!==customer||order.billingMode!=='subscription'||order.subtotal!==subtotal||JSON.stringify(order.priceIds)!==JSON.stringify(selected.map(i=>i.priceId)))return fail('ORDER_REQUIRES_REVIEW',409);
   const base=origin()+'/'+locale+'/account';
@@ -340,5 +354,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED','BILLING_ADDRESS_REVIEW_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
