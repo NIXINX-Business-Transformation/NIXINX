@@ -61,7 +61,7 @@ for(const locale of ["en","es","fr"]){
  assert.equal(await page.locator(".nx-dash").getAttribute("data-theme"),"system");
  // Check logged-out form using the same actual route, with no identity provider.
  signedIn=false;
- for(const [width,height] of sizes){await page.setViewportSize({width,height});await page.goto(base+"/"+locale+"/account");await page.locator(".nx-login-card").waitFor();assert.equal(await page.locator("html").getAttribute("lang"),locale);const ok=await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1&&[...document.querySelectorAll(".nx-login-card input,.nx-login-card button")].every(e=>e.getBoundingClientRect().height>=43.5));if(!ok)failures.push({locale,width,height,section:"login"});checks++;}
+ for(const [width,height] of sizes){await page.setViewportSize({width,height});await page.goto(base+"/"+locale+"/account");await page.locator(".nx-login-card").waitFor();assert.equal(await page.locator("html").getAttribute("lang"),locale);const ok=await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth+1&&document.querySelector(".nx-login-card").getBoundingClientRect().width<=460.5&&[...document.querySelectorAll(".nx-login-card input,.nx-login-card button")].every(e=>e.getBoundingClientRect().height>=43.5));if(!ok)failures.push({locale,width,height,section:"login"});checks++;}
  await ctx.close();
 }
 }finally{await browser.close();}
