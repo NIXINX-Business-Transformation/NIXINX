@@ -302,7 +302,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
    return true;
   });
   if(created){
-   const notification=await notifySupportRequest(ref.id,kind,process.env);
+   const notification=await notifySupportRequest(ref.id,kind,{SUPPORT_NOTIFICATIONS_ENABLED:process.env.SUPPORT_NOTIFICATIONS_ENABLED,RESEND_API_KEY:process.env.RESEND_API_KEY,RESEND_FROM_EMAIL:process.env.RESEND_FROM_EMAIL,SUPPORT_NOTIFY_EMAIL:process.env.SUPPORT_NOTIFY_EMAIL});
    // Do not lose or duplicate a saved request when transport or audit update fails.
    // A PENDING record after a crash requires operator review, not an automatic resend.
    await ref.update({internalNotification:{...notification,provider:'resend',checkedAt:FieldValue.serverTimestamp()}}).catch(()=>{});
