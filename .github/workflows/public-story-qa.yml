@@ -4,7 +4,6 @@ on:
     paths:
       - 'components/site.tsx'
       - 'components/use-public-story.ts'
-      - 'components/use-cursor-mist.ts'
       - 'components/public-story.css'
       - 'app/style.css'
       - 'tests/public-story-browser.mjs'

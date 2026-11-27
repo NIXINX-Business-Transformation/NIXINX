@@ -58,15 +58,3 @@
  .public-story[data-story-ready="true"] .radar .orbit-label{transition:opacity 450ms ease 800ms}
 }
 @media(prefers-reduced-motion:reduce){.public-story [data-story-axis]{translate:none!important;transition:none!important}}
-/* Experimental desktop mist: noninteractive, low contrast, no particles. */
-.public-story .nx-cursor-mist{display:none}
-@media(min-width:1051px) and (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
- .public-story .nx-cursor-mist{
-  display:block;position:fixed;top:0;left:0;z-index:30;pointer-events:none;
-  width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;
-  background:radial-gradient(ellipse at 40% 43%,#78a89b22 0%,#779b9011 37%,transparent 70%);
-  opacity:0;transform:translate3d(-200px,-200px,0);
-  transition:opacity 300ms ease,transform 110ms ease-out;
- }
- .public-story .nx-cursor-mist[data-mist="moving"]{opacity:.36}
-}

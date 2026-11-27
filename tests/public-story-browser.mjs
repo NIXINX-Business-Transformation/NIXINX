@@ -39,15 +39,12 @@ for(const engine of engines){
    assert.equal(await page.locator('.vision > div').first().getAttribute('data-story-axis'),'right');
    assert.equal(await page.locator('.flow-with-arrow').first().getAttribute('data-story-axis'),'right');
    assert.equal(await page.locator('.industry-list > div').first().getAttribute('data-story-axis'),'left');
-   if(width>=1051){
-    await page.mouse.move(width/2,height/2);
-    const eligible=await page.evaluate(()=>matchMedia('(min-width:1051px) and (hover:hover) and (pointer:fine)').matches&&navigator.maxTouchPoints<2);
-    if(eligible){await page.evaluate(()=>{document.querySelector('.public-story').dispatchEvent(new PointerEvent('pointermove',{pointerType:'mouse',clientX:350,clientY:300,bubbles:true}));});await page.locator('.nx-cursor-mist[data-mist="moving"]').waitFor({state:'attached'});await page.locator('.nx-cursor-mist[data-mist="moving"]').waitFor({state:'detached'});}
-   }
+   await page.mouse.move(width/2,height/2);
+   assert.equal(await page.locator('.nx-cursor-mist').count(),0,'cursor effect removed');
    await page.emulateMedia({reducedMotion:'reduce'});
    await page.locator('.public-story[data-story-mode="off"]').waitFor();
    assert.equal(await page.locator('[data-story-state]').count(),0);
-   assert.equal(await page.locator('.nx-cursor-mist').evaluate(el=>getComputedStyle(el).display),'none');
+   assert.equal(await page.locator('.nx-cursor-mist').count(),0);
    await page.evaluate(()=>window.scrollTo(0,0));
    const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,head:document.querySelector('h1').textContent,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth}));
    assert.equal(initial.hero,end.hero);assert.equal(initial.nav,end.nav);assert.equal(initial.head,end.head);assert.ok(end.overflow<=1,'horizontal overflow');
@@ -72,7 +69,7 @@ for(const engine of engines){
    const outside=await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
    assert.ok(outside<=1,'rotation overflow');
    await page.evaluate(()=>document.querySelector('.public-story').dispatchEvent(new PointerEvent('pointermove',{pointerType:'touch',clientX:150,clientY:150,bubbles:true})));
-   assert.equal(await page.locator('.nx-cursor-mist[data-mist="moving"]').count(),0,'mist disabled for touch');
+   assert.equal(await page.locator('.nx-cursor-mist').count(),0,'cursor effect absent on touch');
    await page.evaluate(()=>{let e=document.querySelector('.stage-item'),y=0;while(e){y+=e.offsetTop;e=e.offsetParent;}window.scrollTo(0,y-innerHeight*.55)});
    await page.waitForFunction(()=>document.querySelector('.stage-item').dataset.storyState==='shown');
    console.log('PASS',engine.name(),'touch rotation',w,h);

@@ -7,7 +7,6 @@ import { words } from '@/lib/i18n';
 import {BrandMark,Wordmark,PillarIcon} from '@/components/brand';
 import {executiveCopy} from '@/lib/executive-copy';
 import {usePublicStory} from '@/components/use-public-story';
-import {useCursorMist} from '@/components/use-cursor-mist';
 import './public-story.css';
 
 type TurnstileClient={render:(element:HTMLElement,settings:Record<string,unknown>)=>string;reset?:()=>void};
@@ -47,7 +46,6 @@ export default function Site({locale}:{locale:Locale}){
   const t=words[locale];const e=executiveCopy[locale];const [menu,setMenu]=useState(false);
   const story=useRef<HTMLElement>(null);
   usePublicStory(story,locale);
-  useCursorMist(story);
   useEffect(()=>{document.documentElement.lang=locale},[locale]);
   return <>
     <header className="site-header"><div className="nav-wrap"><Link className="logo" href={`/${locale}`} aria-label="NIXINX"><BrandMark/><Wordmark/></Link>
@@ -73,7 +71,6 @@ export default function Site({locale}:{locale:Locale}){
       <section className="section assessment-promo"><div><span className="tag">{t.assessment.tag}</span><h2>{t.assessment.headline}</h2><p>{t.assessment.sub}</p></div><Link className="button primary" href={`/${locale}/assessment`}>{t.assessment.homeButton} <span aria-hidden="true">↗</span></Link></section>
       <section className="section commercial" id="business"><div className="section-heading"><div><span className="tag">{t.businessTag}</span><h2>{t.businessTitle}</h2></div></div><div className="revenue-grid">{t.revenue.map(([name,desc],i)=><article key={name}><div className="revenue-top"><span>0{i+1}</span><b aria-hidden="true">↗</b></div><h3>{name}</h3><p>{desc}</p></article>)}</div><p className="business-note">{t.businessNote}</p></section>
       <section className="section contact" id="contact"><div><span className="tag">{t.contactTag}</span><h2>{t.contactTitle}</h2><p>{t.contactDesc}</p><div className="contact-deco"><div className="contact-pulse"/>NIXINX <span>·</span> BUSINESS TRANSFORMATION</div></div><LeadForm locale={locale}/></section>
-      <div className="nx-cursor-mist" aria-hidden="true"/>
     </main><footer className="footer"><div><span className="footer-word"><Wordmark/></span><p>{t.footer}</p></div><div className="footer-links"><Link href={`/${locale}/privacy`}>{t.privacy}</Link><a href="#top">↑</a></div><small>© {new Date().getFullYear()} NIXINX. {t.copyright}</small></footer>
   </>;
 }
