@@ -1,0 +1,28 @@
+name: Portal responsive and locale QA
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  browser-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --package-lock=false --no-audit --no-fund playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Local browser fixture QA (no real API or credentials)
+        run: |
+          npm run start -- -p 3100 > /tmp/nixinx-portal-qa.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3100/en/account >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3100/en/account >/dev/null
+          node tests/portal-responsive-browser.mjs

@@ -96,3 +96,11 @@
  .nx-dash .nx-tools label{flex:1}
  .nx-dash .nx-sidebar nav button{gap:6px}
 }
+
+/* Responsive acceptance: constrain intrinsic long content, never hide page overflow. */
+.nx-dash .nx-login-card,.nx-dash .nx-login-card>*,.nx-dash .nx-content>*,.nx-dash .nx-form>*,.nx-dash .nx-fields>*,.nx-dash .nx-app-grid>*,.nx-dash .nx-tax-summary,.nx-dash .nx-workspace>*,.nx-dash .nx-sidebar nav button{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.nx-dash .nx-consent label span,.nx-dash .nx-stripe-brand span{min-width:0;overflow-wrap:anywhere}
+.nx-dash .nx-tools>select,.nx-dash .nx-tools label select{min-width:44px}
+.nx-dash .nx-app-card>b,.nx-dash .nx-app-card>strong,.nx-dash .nx-app-card>small{min-width:0;overflow-wrap:anywhere}
+@media(max-width:950px) and (min-width:761px){.nx-dash .nx-fields,.nx-dash .nx-app-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:430px){.nx-dash .nx-photo-row>button,.nx-dash .nx-form>button,.nx-dash .nx-stripe-panel>button{width:100%}.nx-dash .nx-tools label{flex-wrap:wrap;min-width:0}.nx-dash .nx-login-card{padding:18px}}
