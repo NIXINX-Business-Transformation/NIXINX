@@ -1,0 +1,50 @@
+/* NIXINX public homepage only — additive editorial motion.
+   Preserve the approved hero, navigation, typography, layout and hover effects.
+   All elements are fully visible and static unless an entrance is triggered. */
+.public-story{
+ --nx-story-distance:12px;
+ --nx-story-duration:600ms;
+ --nx-story-ease:cubic-bezier(.22,.61,.36,1);
+}
+/* Retire the original scrubbing on these four groups ONLY on the homepage.
+   The resting appearance is unchanged; the hero's facade is not targeted. */
+.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article){
+ animation:none;
+}
+@media(prefers-reduced-motion:no-preference){
+ .public-story [data-story-enter="true"]{
+  animation:nx-public-enter var(--nx-story-duration) var(--nx-story-ease) both;
+  animation-delay:var(--nx-story-delay,0ms);
+ }
+ .public-story .flow-arrow[data-story-enter="true"]{
+  animation:nx-public-flow 480ms var(--nx-story-ease) both;
+  animation-delay:var(--nx-story-delay,0ms);
+ }
+ /* A restrained rhythm across desktop grids. A single column has no delay. */
+ @media(min-width:751px){
+  .public-story :is(.stage-item,.capability,.usecase-grid article,.revenue-grid article):nth-child(2n){--nx-story-delay:65ms}
+  .public-story :is(.stage-item,.capability,.usecase-grid article,.revenue-grid article):nth-child(3n){--nx-story-delay:110ms}
+  .public-story .flow-with-arrow:nth-child(2) :is(.flow-node,.flow-arrow){--nx-story-delay:70ms}
+  .public-story .flow-with-arrow:nth-child(3) :is(.flow-node,.flow-arrow){--nx-story-delay:120ms}
+  .public-story .flow-with-arrow:nth-child(4) .flow-node{--nx-story-delay:160ms}
+  .public-story .vision>div:nth-child(2),.public-story .section-heading>p{--nx-story-delay:80ms}
+ }
+ @media(max-width:750px){
+  .public-story{--nx-story-distance:7px;--nx-story-duration:440ms}
+ }
+ /* A keyboard-focused element should never move under the pointer/focus. */
+ .public-story [data-story-enter="true"]:focus-within{animation:none}
+}
+/* Individual translate preserves each component's existing transform/hover.
+   Text remains fully opaque at every frame; no horizontal motion on mobile. */
+@keyframes nx-public-enter{
+ from{translate:0 var(--nx-story-distance)}
+ to{translate:0 0}
+}
+@keyframes nx-public-flow{
+ from{translate:-5px 0}
+ to{translate:0 0}
+}
+@media(prefers-reduced-motion:reduce){
+ .public-story [data-story-enter="true"]{animation:none!important;translate:none!important}
+}

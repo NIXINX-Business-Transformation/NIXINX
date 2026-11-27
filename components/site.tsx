@@ -1,11 +1,13 @@
 'use client';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Script from 'next/script';
 import type { Locale } from '@/lib/i18n';
 import { words } from '@/lib/i18n';
 import {BrandMark,Wordmark,PillarIcon} from '@/components/brand';
 import {executiveCopy} from '@/lib/executive-copy';
+import {usePublicStory} from '@/components/use-public-story';
+import './public-story.css';
 
 type TurnstileClient={render:(element:HTMLElement,settings:Record<string,unknown>)=>string;reset?:()=>void};
 declare global {interface Window {turnstile?:TurnstileClient}}
@@ -42,12 +44,14 @@ function LeadForm({locale}:{locale:Locale}){
 }
 export default function Site({locale}:{locale:Locale}){
   const t=words[locale];const e=executiveCopy[locale];const [menu,setMenu]=useState(false);
+  const story=useRef<HTMLElement>(null);
+  usePublicStory(story,locale);
   useEffect(()=>{document.documentElement.lang=locale},[locale]);
   return <>
     <header className="site-header"><div className="nav-wrap"><Link className="logo" href={`/${locale}`} aria-label="NIXINX"><BrandMark/><Wordmark/></Link>
       <nav id="main-navigation" className={menu?'main-nav is-open':'main-nav'} aria-label="Main navigation">{t.nav.map((name,i)=><a key={sections[i]} onClick={()=>setMenu(false)} href={`#${sections[i]}`}>{name}</a>)}<Link className="nav-assessment" href={`/${locale}/assessment`} onClick={()=>setMenu(false)}>{t.assessment.nav}</Link></nav>
       <div className="nav-side"><Link className="nav-login" href={`/${locale}/account`} onClick={()=>setMenu(false)} aria-label={locale==='es'?'Iniciar sesión':locale==='fr'?'Se connecter':'Sign in'}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20v-1a7 7 0 0 1 14 0v1"/></svg><span>{locale==='es'?'Iniciar sesión':locale==='fr'?'Se connecter':'Sign in'}</span></Link><div className="lang" aria-label="Language selection">{(['en','es','fr'] as Locale[]).map(code=><Link key={code} href={`/${code}`} aria-current={code===locale?'page':undefined} hrefLang={code} lang={code} onClick={()=>{document.cookie=`nixinx_locale=${code}; Path=/; Max-Age=31536000; SameSite=Lax`;}}>{code.toUpperCase()}</Link>)}</div><a className="nav-action" href="#contact">{t.cta} <span>↗</span></a><button className="menu-trigger" onClick={()=>setMenu(!menu)} aria-expanded={menu} aria-controls="main-navigation" aria-label={locale==='es'?'Abrir o cerrar menú':locale==='fr'?'Ouvrir ou fermer le menu':'Toggle menu'}>{menu?'✕':'☰'}</button></div></div></header>
-    <main>
+    <main className="public-story" ref={story}>
       <section className="hero executive-hero" id="top">
         <div className="hero-facade" aria-hidden="true"/>
         <div className="hero-copy"><div className="eyebrow"><span className="hero-rule"/>BUSINESS TRANSFORMATION</div>
