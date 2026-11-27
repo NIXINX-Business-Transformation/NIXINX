@@ -21,19 +21,22 @@ export async function invoiceAdjustments(db:Firestore,uid:string,invoiceId:strin
  if(c.livemode!==false||c.deleted||c.id!==customer||c.metadata?.nixinx_owner!=="nixinx-commercial-sandbox-v1"||c.metadata?.nixinx_uid_hash!==createHash("sha256").update(uid).digest("hex"))throw Error("BILLING_BINDING_INVALID");
  const invoice=await stripe("invoices/"+invoiceId);
  if(invoice.livemode!==false||invoice.object!=="invoice"||invoice.id!==invoiceId||invoice.customer!==customer||invoice.currency!=="cad")throw Error("BILLING_BINDING_INVALID");
- const page=await stripe("credit_notes?"+new URLSearchParams({invoice:invoiceId,customer,limit:"100","expand[]":"data.refund"}));
+ const page=await stripe("credit_notes?"+new URLSearchParams({invoice:invoiceId,limit:"100"}));
  if(page.object!=="list"||!Array.isArray(page.data)||page.has_more!==false)throw Error("BILLING_HISTORY_LIMIT");
  const seen=new Set<string>();
- const notes=page.data.map((n:any)=>{
+ const notes=[];
+ for(const n of page.data){
   if(n.object!=="credit_note"||n.livemode!==false||!id(n.id,"cn_")||seen.has(n.id)||n.invoice!==invoiceId||n.customer!==customer||n.currency!=="cad"||!amount(n.amount)||typeof n.number!=="string"||!n.number||!["issued","void"].includes(n.status))throw Error("BILLING_BINDING_INVALID");
   seen.add(n.id);
   let refund:null|{amount:number;status:string}=null;
   if(n.refund!==null){
-   const f=n.refund;
-   if(!f||f.object!=="refund"||!id(f.id,"re_")||f.livemode===true||!id(invoice.payment_intent,"pi_")||f.payment_intent!==invoice.payment_intent||f.currency!=="cad"||!amount(f.amount)||f.amount>n.amount||!validRefundStates.has(f.status))throw Error("BILLING_RECONCILIATION_REQUIRED");
+   if(!id(n.refund,"re_")||!id(invoice.payment_intent,"pi_"))throw Error("BILLING_RECONCILIATION_REQUIRED");
+   // Stripe 2024-06-20 returns the linked refund ID without expansion.
+   const f=await stripe("refunds/"+n.refund);
+   if(!f||f.object!=="refund"||f.id!==n.refund||(f.livemode!==undefined&&f.livemode!==false)||f.payment_intent!==invoice.payment_intent||f.currency!=="cad"||!amount(f.amount)||f.amount>n.amount||!validRefundStates.has(f.status))throw Error("BILLING_RECONCILIATION_REQUIRED");
    refund={amount:f.amount,status:f.status};
   }
-  return {id:n.id,number:n.number,amount:n.amount,status:n.status,pdf:documentUrl(n.pdf),refund};
- });
+  notes.push({id:n.id,number:n.number,amount:n.amount,status:n.status,pdf:documentUrl(n.pdf),refund});
+ }
  return {notes};
 }

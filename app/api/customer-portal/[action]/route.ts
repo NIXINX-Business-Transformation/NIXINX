@@ -41,7 +41,11 @@ async function stripe(path:string,form?:URLSearchParams,idempotency?:string,onHt
  const headers:Record<string,string>={Authorization:'Bearer '+key,'Stripe-Version':'2024-06-20'};
  if(form)headers['Content-Type']='application/x-www-form-urlencoded';if(idempotency)headers['Idempotency-Key']=idempotency;
  const res=await fetch('https://api.stripe.com/v1/'+path,{method:form?'POST':'GET',headers,body:form,cache:'no-store',signal:AbortSignal.timeout(15000)});
- if(!res.ok){onHttpError?.(res.status);throw Error('STRIPE_UNAVAILABLE');}const obj=await res.json();if(obj.object==='list'?(!Array.isArray(obj.data)||obj.data.some((v:{livemode?:boolean})=>v.livemode!==false)):obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
+ if(!res.ok){onHttpError?.(res.status);throw Error('STRIPE_UNAVAILABLE');}const obj=await res.json();
+ // Refund objects in the pinned API omit livemode. Only allow an exact
+ // GET refund object on the sandbox key; invoiceAdjustments checks its PI.
+ if(!form&&onHttpError&&/^refunds\/re_[A-Za-z0-9_]+$/.test(path)&&obj.object==='refund'&&obj.id===path.slice('refunds/'.length)){if(obj.livemode!==undefined&&obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;}
+ if(obj.object==='list'?(!Array.isArray(obj.data)||obj.data.some((v:{livemode?:boolean})=>v.livemode!==false)):obj.livemode!==false)throw Error('LIVE_REJECTED');return obj;
 }
 const catalog=commercialCatalog;
 function signature(raw:string,header:string){
@@ -271,7 +275,7 @@ export async function POST(req:NextRequest,{params}:Ctx){
   let stage='ownership',upstreamStatus:number|null=null;
   try{
    return result(await invoiceAdjustments(db,u.uid,invoiceId,async path=>{
-    stage=path.startsWith('customers/')?'customer':path.startsWith('invoices/')?'invoice':path.startsWith('credit_notes?')?'credit-notes':'unexpected';
+    stage=path.startsWith('customers/')?'customer':path.startsWith('invoices/')?'invoice':path.startsWith('credit_notes?')?'credit-notes':path.startsWith('refunds/')?'refund':'unexpected';
     return stripe(path,undefined,undefined,status=>{upstreamStatus=status;});
    }));
   }catch(e){

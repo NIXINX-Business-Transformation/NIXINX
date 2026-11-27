@@ -212,8 +212,9 @@ test('subscription deleted webhook records Stripe fact, never executes cancellat
 function creditFixture(h){
  h.put('commercial_invoices/in_renewal',{uid:'a',environment:'sandbox',customerId:'cus_fixture'});
  renewal(h,{object:'invoice',payment_intent:'pi_fixture'});
- const note={id:'cn_fixture',object:'credit_note',livemode:false,customer:'cus_fixture',invoice:'in_renewal',currency:'cad',number:'FIXTURE-CN-01',amount:19,status:'issued',pdf:'https://pay.stripe.com/credit_notes/acct_fixture/test_fixture/pdf',refund:{id:'re_fixture',object:'refund',payment_intent:'pi_fixture',currency:'cad',amount:19,status:'succeeded'}};
- h.stripeFixtures['credit_notes?invoice=in_renewal&customer=cus_fixture&limit=100&expand%5B%5D=data.refund']={object:'list',has_more:false,data:[note]};
+ const note={id:'cn_fixture',object:'credit_note',livemode:false,customer:'cus_fixture',invoice:'in_renewal',currency:'cad',number:'FIXTURE-CN-01',amount:19,status:'issued',pdf:'https://pay.stripe.com/credit_notes/acct_fixture/test_fixture/pdf',refund:'re_fixture'};
+ h.stripeFixtures['credit_notes?invoice=in_renewal&limit=100']={object:'list',has_more:false,data:[note]};
+ h.stripeFixtures['refunds/re_fixture']={id:'re_fixture',object:'refund',payment_intent:'pi_fixture',currency:'cad',amount:19,status:'succeeded'};
  return note;
 }
 test('customer invoice adjustments: returns only native note and linked refund, zero writes',async()=>{
@@ -221,7 +222,7 @@ test('customer invoice adjustments: returns only native note and linked refund, 
  const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});
  assert.equal(r.status,200);
  assert.deepEqual(r.body,{notes:[{id:note.id,number:note.number,amount:19,status:'issued',pdf:note.pdf,refund:{amount:19,status:'succeeded'}}]});
- assert.equal(h.requests.length,3);assert.equal(h.writes.length,0);
+ assert.deepEqual(h.requests,['customers/cus_fixture','invoices/in_renewal','credit_notes?invoice=in_renewal&limit=100','refunds/re_fixture']);assert.equal(h.writes.length,0);
 });
 test('customer invoice adjustments: foreign and unauthenticated requests never reach Stripe',async()=>{
  const h=harness();creditFixture(h);
@@ -233,7 +234,7 @@ test('customer invoice adjustments: reject mismatched note, refund and billing o
  for(const variant of ['note','refund','binding','live','invoice']){
   const h=harness(),note=creditFixture(h);
   if(variant==='note')note.customer='cus_other';
-  if(variant==='refund')note.refund.payment_intent='pi_other';
+  if(variant==='refund')h.stripeFixtures['refunds/re_fixture'].payment_intent='pi_other';
   if(variant==='binding')h.put('commercial_billing_customers/a',{uid:'b',environment:'sandbox',stripeCustomerId:'cus_fixture'});
   if(variant==='live')note.livemode=true;
   if(variant==='invoice')h.stripeFixtures['invoices/in_renewal'].customer='cus_other';
@@ -241,14 +242,38 @@ test('customer invoice adjustments: reject mismatched note, refund and billing o
  }
 });
 test('customer invoice adjustments: rejects external PDF link; preserves note/refund states',async()=>{
- const h=harness(),note=creditFixture(h);note.pdf='https://pay.stripe.com.invalid/credit_notes/a';note.refund.status='pending';
+ const h=harness(),note=creditFixture(h);note.pdf='https://pay.stripe.com.invalid/credit_notes/a';h.stripeFixtures['refunds/re_fixture'].status='pending';
  const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,200);assert.equal(r.body.notes[0].pdf,null);assert.equal(r.body.notes[0].refund.status,'pending');assert.equal(h.writes.length,0);
 });
 
 test('invoice adjustment diagnostics: denied Stripe read returns safe code without mutations or upstream details',async()=>{
- const h=harness();creditFixture(h);h.stripeFixtures['credit_notes?invoice=in_renewal&customer=cus_fixture&limit=100&expand%5B%5D=data.refund']={__httpStatus:403};
+ const h=harness();creditFixture(h);h.stripeFixtures['credit_notes?invoice=in_renewal&limit=100']={__httpStatus:403};
  const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,503);assert.deepEqual(r.body,{error:'INVOICE_ADJUSTMENTS_UNAVAILABLE',diagnostic:'NX-ADJ-READ-PERMISSION'});assert.equal(h.writes.length,0);assert.equal(h.requests.length,3);
 });
 test('invoice adjustment diagnostics: invalid provider binding remains fail closed',async()=>{
  const h=harness(),note=creditFixture(h);note.customer='cus_other';const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,409);assert.equal(r.body.diagnostic,'NX-ADJ-BINDING');assert.equal(r.body.notes,undefined);assert.equal(h.writes.length,0);
+});
+
+test('credit note without refund does not make a refund request',async()=>{
+ const h=harness(),note=creditFixture(h);note.refund=null;
+ const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,200);assert.equal(r.body.notes[0].refund,null);assert.equal(h.requests.length,3);assert.equal(h.writes.length,0);
+});
+test('refund reads reject foreign identity, live mode and unsafe reference',async()=>{
+ for(const variant of ['id','live','reference','invoice']){
+  const h=harness(),note=creditFixture(h);
+  if(variant==='id')h.stripeFixtures['refunds/re_fixture'].id='re_other';
+  if(variant==='live')h.stripeFixtures['refunds/re_fixture'].livemode=true;
+  if(variant==='reference')note.refund='re_fixture?other=1';
+  if(variant==='invoice')note.invoice='in_other';
+  const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.ok(r.status>=400,variant);assert.equal(r.body.notes,undefined);assert.equal(h.writes.length,0);
+  if(variant==='reference'||variant==='invoice')assert.equal(h.requests.length,3);
+ }
+});
+test('credit-notes upstream 400 remains diagnosable without writes',async()=>{
+ const h=harness();creditFixture(h);h.stripeFixtures['credit_notes?invoice=in_renewal&limit=100']={__httpStatus:400};
+ const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,503);assert.equal(r.body.diagnostic,'NX-ADJ-UPSTREAM-REQUEST');assert.equal(h.requests.length,3);assert.equal(h.writes.length,0);
+});
+test('linked refund read permission failures remain closed',async()=>{
+ const h=harness();creditFixture(h);h.stripeFixtures['refunds/re_fixture']={__httpStatus:403};
+ const r=await h.post('invoice-adjustments',{invoiceId:'in_renewal'});assert.equal(r.status,503);assert.equal(r.body.diagnostic,'NX-ADJ-READ-PERMISSION');assert.equal(h.requests.length,4);assert.equal(h.writes.length,0);
 });
