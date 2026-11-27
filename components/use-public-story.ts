@@ -28,8 +28,8 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
    frame=0;
    if(!running||motion.matches)return;
    const vh=window.innerHeight;
-   const small=window.innerWidth<=750;
-   const distance=small?34:64;
+   const small=window.innerWidth<=750||vh<=540;
+   const distance=Math.min(small?52:88,vh*(small?.13:.16));
    const heroProgress=hero?clamp(-hero.getBoundingClientRect().top/Math.min(620,Math.max(240,hero.offsetHeight*.65))):0;
    // Read geometry before writing styles; compensate the preceding translation.
    const next=targets.map(t=>{
@@ -40,10 +40,11 @@ export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
     const item=t.el.matches('.flow-node')?parent:t.el;
     const index=grouped&&item?.parentElement?Array.prototype.indexOf.call(item.parentElement.children,item):0;
     const delay=small?0:Math.min(3,Math.max(0,index))*0.065;
-    const progress=clamp((vh*.96-top)/(vh*.40)-delay);
+    // Keep motion active well inside the viewport (not just at the lower edge).
+    const progress=clamp((vh*.98-top)/(vh*.72)-delay);
     const p=t.el.matches(':focus-within')?1:progress;
     // Gentle easing, with a longer perceptible middle phase.
-    const eased=p*p*(3-2*p);
+    const eased=p;
     return {t,y:Math.round(distance*(1-eased)*100)/100,p:Math.round(eased*1000)/1000};
    });
    root.style.setProperty('--nx-hero-progress',String(heroProgress));

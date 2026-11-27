@@ -18,23 +18,26 @@
  .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
   animation:none;
  }
- /* At scroll position zero the approved facade is unchanged. */
+ /* Reverse the depth effect: the facade recedes on exit, not on entry.
+    At scroll position zero the approved facade is unchanged. */
  @media(min-width:751px){
   .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
-   scale:calc(1 + .09 * var(--nx-hero-progress,0));
+   scale:calc(1 - .09 * var(--nx-hero-progress,0));
    transform-origin:right center;
   }
  }
  @media(max-width:750px){
   .public-story[data-story-mode="scroll"] .executive-hero .hero-facade{
    overflow:hidden;
+   background-image:none;
   }
   /* Keep the mobile image inside its existing frame; animate only a visual
      layer, not the box or surrounding text. */
   .public-story[data-story-mode="scroll"] .executive-hero .hero-facade::after{
    content:'';position:absolute;inset:0;pointer-events:none;
-   background:inherit;
-   scale:calc(1 + .09 * var(--nx-hero-progress,0));
+   background-image:linear-gradient(180deg,#1b2b31 0%,transparent 24%,transparent 68%,#1b2b31 100%),url('/images/nixinx-hero-facade.webp');
+   background-size:cover;background-position:center 44%;background-repeat:no-repeat;
+   scale:calc(1 - .09 * var(--nx-hero-progress,0));
    transform-origin:center;
   }
  }
