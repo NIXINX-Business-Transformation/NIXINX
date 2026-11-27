@@ -11,6 +11,7 @@ import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl,isConfir
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
 import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches,paidFiscalReviewRequired,sameHeldPayment,fiscalProfileAddress,knownStripeAddressConflicts} from '@/lib/commercial-billing-address';
+import {invoiceAdjustments} from '@/lib/commercial-invoice-adjustments';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
 import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
@@ -265,6 +266,10 @@ export async function POST(req:NextRequest,{params}:Ctx){
   if(action==='notifications')return result({notifications:rows.docs.map(d=>({id:d.id,type:d.get('type'),read:d.get('read')===true,date:d.get('createdAt')?.toMillis?.()??null})).sort((a,b)=>(b.date??0)-(a.date??0))});
   return result({invoices:rows.docs.map(d=>({id:d.id,number:d.get('number')??null,status:d.get('status'),amountDue:d.get('amountDue'),amountPaid:d.get('amountPaid'),currency:d.get('currency'),date:Number(d.get('eventCreated')??0)*1000})).sort((a,b)=>b.date-a.date)});
  }
+ if(action==='invoice-adjustments'){
+  const invoiceId=str(body.invoiceId);if(!/^in_[A-Za-z0-9]+$/.test(invoiceId)||invoiceId.length>100)return fail('INVALID_INVOICE');
+  return result(await invoiceAdjustments(db,u.uid,invoiceId,stripe));
+ }
  if(action==='notification-read'){
   const id=str(body.id);if(!/^evt_[A-Za-z0-9_]+$/.test(id))return fail('INVALID_NOTIFICATION');
   const ref=db.collection('commercial_notifications').doc(id);
@@ -354,5 +359,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED','BILLING_ADDRESS_REVIEW_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED','BILLING_ADDRESS_REVIEW_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND'||c==='INVOICE_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }
