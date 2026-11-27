@@ -10,7 +10,7 @@ import {validateCommercialProfile,profileLimits,normalizeCanadianPostal,legalBil
 import {reservedApplicationIds,resumableCommercialOrder,openCheckoutUrl} from '@/lib/commercial-app-eligibility';
 import {countryCode,provinceCode} from '@/lib/commercial-geography';
 import { commercialTaxPolicy, quoteTax } from '@/lib/commercial-tax';
-import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress} from '@/lib/commercial-billing-address';
+import {confirmedDeclaredTaxAddress,sameDeclaredTaxAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches} from '@/lib/commercial-billing-address';
 import { CONSENT_VERSION } from '@/lib/commercial-consents';
 import {validNewOrganizationAcronym,normalizeOrganizationAcronym} from '@/lib/organization-acronym';
 export const runtime='nodejs';
@@ -20,6 +20,8 @@ const result=(body:unknown,status=200)=>NextResponse.json(body,{status,headers:{
 const fail=(code:string,status=400)=>result({error:code},status);
 const str=(v:unknown)=>typeof v==='string'?v.trim():'';
 const slug=/^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])$/;
+// Bind the optimistic concurrency token to the authenticated account and the full document revision.
+function profileRevision(uid:string,snapshot:FirebaseFirestore.DocumentSnapshot){const time=snapshot.updateTime;if(snapshot.exists&&!time)throw Error('PROFILE_REVISION_REQUIRED');return createHash('sha256').update(JSON.stringify([uid,time?`${time.seconds}:${time.nanoseconds}`:'missing'])).digest('hex');}
 function service(){
  const projectId=process.env.FIREBASE_PROJECT_ID,clientEmail=process.env.FIREBASE_CLIENT_EMAIL,privateKey=process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n');
  if(!projectId||!clientEmail||!privateKey)throw Error('NOT_CONFIGURED');
@@ -92,7 +94,7 @@ export async function GET(req:NextRequest,{params}:Ctx){
  const {db}=service();const [p,orders,items,tickets]=await Promise.all([db.collection('commercial_profiles').doc(u.uid).get(),db.collection('commercial_orders').where('uid','==',u.uid).limit(501).get(),catalog().catch(()=>null),db.collection('commercial_support_requests').where('uid','==',u.uid).limit(100).get()]);
  if(orders.size>500)return fail('ORDER_HISTORY_LIMIT',409);
  const records=orders.docs.map(d=>({id:d.id,status:d.get('status'),billingMode:d.get('billingMode')??'payment',subscriptionId:d.get('stripeSubscriptionId')??null,applicationIds:d.get('applicationIds')??[],amount:d.get('amount')??d.get('subtotal')??0,currency:d.get('currency'),date:d.get('paidAt')?.toMillis?.()??d.get('createdAt')?.toMillis?.()??null}));
- return result({email:u.email,communication:{email:p.get('communication.email')===true,sms:p.get('communication.sms')===true},profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
+ return result({email:u.email,profileRevision:profileRevision(u.uid,p),communication:{email:p.get('communication.email')===true,sms:p.get('communication.sms')===true},profile:p.data()??null,taxPolicy:commercialTaxPolicy(p.data()??null),items:(items??[]).map(({priceId,...item})=>item),catalogAvailable:items!==null,orders:records.sort((a,b)=>(b.date??0)-(a.date??0)),tickets:tickets.docs.map(d=>({id:d.id,kind:d.get('kind'),subject:d.get('subject'),status:d.get('status'),date:d.get('createdAt')?.toMillis?.()??null}))});
  }catch{return fail('PORTAL_UNAVAILABLE',503);}
 }
 const syncOrigin='https://controlde.nixinx.org';
@@ -226,12 +228,18 @@ export async function POST(req:NextRequest,{params}:Ctx){
    if(typeof body.avatar!=='string'||body.avatar.length>120000||(body.avatar!==''&&!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(body.avatar)))return fail('INVALID_AVATAR');
    details.avatar=body.avatar;
   }
-  const claim=db.collection('commercial_acronyms').doc(acronym);
+  const claim=db.collection('commercial_acronyms').doc(acronym),history=p.collection('fiscal_address_history').doc();
   await db.runTransaction(async tx=>{const [old,c]=await Promise.all([tx.get(p),tx.get(claim)]);
+   const revision=profileRevision(u.uid,old);
+   if(!profileRevisionMatches(body.profileRevision,revision))throw Error('PROFILE_REVISION_REQUIRED');
+   const next={...old.data(),...details,name,company,acronym,email:u.email};
+   const changed=changedFiscalProfileFields(old.data(),next);
+   if(old.exists&&changed.length&&!confirmedFiscalProfileChange(body.addressChangeConfirmed,body.confirmedFiscalAddress,next))throw Error('FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED');
    if(old.exists&&old.get('acronym')!==rawAcronym)throw Error('ACRONYM_IMMUTABLE');
    if(!old.exists&&!validNewOrganizationAcronym(acronym))throw Error('INVALID_NEW_ACRONYM');
    if(c.exists&&c.get('uid')!==u.uid)throw Error('ACRONYM_TAKEN');
    if(!c.exists)tx.create(claim,{uid:u.uid});tx.set(p,{...details,name,company,acronym,email:u.email},{merge:true});
+   if(changed.length)tx.create(history,{actorUid:u.uid,kind:old.exists?'address_changed':'address_created',fields:changed,at:FieldValue.serverTimestamp(),previousRevision:revision});
   });return result({ok:true});
  }
  if(action==='notifications'||action==='invoices'){
@@ -323,5 +331,5 @@ export async function POST(req:NextRequest,{params}:Ctx){
   await ref.update({stripeSessionId:s.id});return result({url:s.url});
  }
  return fail('NOT_FOUND',404);
- }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
+ }catch(e){const c=e instanceof Error?e.message:'';if(['ACRONYM_IMMUTABLE','ACRONYM_TAKEN','ORDER_MISMATCH','APPLICATION_ALREADY_ORDERED','BILLING_RECONCILIATION_REQUIRED','BILLING_CONFIGURATION_REVIEW','BILLING_BINDING_INVALID','BILLING_LEGAL_NAME_REVIEW','BILLING_ADDRESS_CONFIRMATION_REQUIRED','PROFILE_REVISION_REQUIRED','FISCAL_ADDRESS_CHANGE_CONFIRMATION_REQUIRED'].includes(c))return fail(c,409);if(['PROFILE_REQUIRED','PHONE_REQUIRED','ORDER_REQUIRES_REVIEW'].includes(c))return fail(c,409);if(c==='INVALID_NEW_ACRONYM')return fail(c,400);if(c==='NOTIFICATION_NOT_FOUND')return fail(c,404);if(c==='AUTH_FAILED')return fail(c,401);return fail('PORTAL_UNAVAILABLE',503);}
 }

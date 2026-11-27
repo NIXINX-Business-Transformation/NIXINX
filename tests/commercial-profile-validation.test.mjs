@@ -36,7 +36,7 @@ test("both legal and operating names required; may be identical; personal name m
  assert.equal(legalBillingName("Test\u200b Inc."),null);
 });
 
-const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress}=await import(url(compile("../lib/commercial-billing-address.ts")));
+const {sameDeclaredTaxAddress,confirmedDeclaredTaxAddress,fiscalProfileAddress,changedFiscalProfileFields,confirmedFiscalProfileChange,profileRevisionMatches}=await import(url(compile("../lib/commercial-billing-address.ts").replace('"./commercial-geography"',JSON.stringify(geo))));
 test("declared billing confirmation binds only to the exact current server snapshot",()=>{
  const saved={country:"CA",province:"ON",postal:"N9A1A1",city:"Windsor",line1:"100 Main St"};
  assert.equal(confirmedDeclaredTaxAddress(true,{...saved},saved),true);
@@ -45,4 +45,20 @@ test("declared billing confirmation binds only to the exact current server snaps
  assert.equal(sameDeclaredTaxAddress({...saved,extra:"foreign"},saved),false);
  assert.equal(sameDeclaredTaxAddress(null,saved),false);
  assert.equal(sameDeclaredTaxAddress({...saved,line1:""},saved),false);
+});
+
+test("profile fiscal edits require exact confirmed new address including unit; cosmetic formatting does not change identity",()=>{
+ const before={...valid,address2:"Unit 2",country:"Canada",province:"Ontario"};
+ const after={...before,address1:"101 Main St",address2:"Unit 3"};
+ assert.deepEqual(changedFiscalProfileFields(before,{...before,country:"CA",province:"ON",postalCode:"N9A 1A1"}),[]);
+ assert.deepEqual(changedFiscalProfileFields(before,after),["address1","address2"]);
+ assert.equal(confirmedFiscalProfileChange(true,fiscalProfileAddress(after),after),true);
+ assert.equal(confirmedFiscalProfileChange(false,fiscalProfileAddress(after),after),false);
+ assert.equal(confirmedFiscalProfileChange(true,fiscalProfileAddress(before),after),false);
+ assert.equal(confirmedFiscalProfileChange(true,{...fiscalProfileAddress(after),address2:""},after),false);
+});
+test("profile revisions reject missing, stale and different-account tokens",()=>{
+ const token="a".repeat(64),foreign="b".repeat(64);
+ assert.equal(profileRevisionMatches(token,token),true);
+ for(const value of [undefined,null,"",foreign,true])assert.equal(profileRevisionMatches(value,token),false);
 });
