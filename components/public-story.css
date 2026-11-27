@@ -1,0 +1,72 @@
+/* Public homepage only. Scroll switches state; CSS owns time and easing. */
+.public-story{overflow-x:clip;--nx-story-distance:80px;--nx-story-duration:1050ms;--nx-story-ease:cubic-bezier(.22,.61,.36,1)}
+.public-story :is(.stage-item,.capability,.flow-node,.usecase-grid article){animation:none}
+@media(max-width:750px),(max-height:540px){.public-story{--nx-story-distance:48px;--nx-story-duration:900ms}}
+@media(prefers-reduced-motion:no-preference){
+ .public-story[data-story-mode="trigger"] [data-story-axis="up"][data-story-state="waiting"]{translate:0 var(--nx-story-distance)}
+ .public-story[data-story-mode="trigger"] [data-story-axis="right"][data-story-state="waiting"]{translate:calc(-1 * var(--nx-story-distance)) 0}
+ .public-story[data-story-mode="trigger"] [data-story-axis="left"][data-story-state="waiting"]{translate:var(--nx-story-distance) 0}
+ .public-story[data-story-mode="trigger"] [data-story-axis]:not([data-story-axis="orbit"])[data-story-state="shown"]{translate:0 0}
+ .public-story[data-story-ready="true"] [data-story-axis]:not([data-story-axis="orbit"]){
+  transition:translate var(--nx-story-duration) var(--nx-story-ease) var(--nx-story-delay,0ms);
+ }
+ .public-story[data-story-ready="true"] .capability[data-story-axis]{
+  transition:translate var(--nx-story-duration) var(--nx-story-ease) var(--nx-story-delay,0ms),transform .2s,box-shadow .2s;
+ }
+ .public-story[data-story-mode="trigger"] [data-story-axis]:focus-within{translate:none!important;transition:none!important}
+ .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{animation:none}
+ @media(min-width:751px){
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{scale:1;transform-origin:right center;transition:scale 1150ms var(--nx-story-ease)}
+  .public-story[data-story-mode="trigger"][data-story-hero="exit"] .executive-hero .hero-facade{scale:.91}
+ }
+ @media(max-width:750px){
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade{overflow:hidden;background-image:none}
+  .public-story[data-story-mode="trigger"] .executive-hero .hero-facade::after{
+   content:'';position:absolute;inset:0;pointer-events:none;
+   background-image:linear-gradient(180deg,#1b2b31 0%,transparent 24%,transparent 68%,#1b2b31 100%),url('/images/nixinx-hero-facade.webp');
+   background-size:cover;background-position:center 44%;background-repeat:no-repeat;
+   scale:1;transform-origin:center;transition:scale 1150ms var(--nx-story-ease);
+  }
+  .public-story[data-story-mode="trigger"][data-story-hero="exit"] .executive-hero .hero-facade::after{scale:.91}
+ }
+}
+/* Three orbital service labels. Only the satellites rotate; the brand stays fixed. */
+.public-story .radar{--nx-orbit-radius:min(100px,31vw)}
+.public-story .radar .radar-point{
+ position:absolute;top:50%;left:50%;right:auto;bottom:auto;width:0;height:0;
+ border:0;background:none;box-shadow:none;
+ transform:rotate(var(--nx-orbit-angle));
+}
+.public-story .radar .p1{--nx-orbit-start:-150deg;--nx-orbit-end:210deg}
+.public-story .radar .p2{--nx-orbit-start:-10deg;--nx-orbit-end:350deg}
+.public-story .radar .p3{--nx-orbit-start:125deg;--nx-orbit-end:485deg}
+.public-story .radar .radar-point{--nx-orbit-angle:var(--nx-orbit-end)}
+.public-story .radar .orbit-badge{
+ position:absolute;left:-24px;top:-13px;width:48px;height:26px;
+ display:grid;place-items:center;
+ transform:translateX(var(--nx-orbit-radius)) rotate(calc(-1 * var(--nx-orbit-angle)));
+}
+.public-story .radar .orbit-badge::before{content:'';position:absolute;inset:0;border:1px solid #8dc9ba;border-radius:20px;background:#e6f6f0;scale:1}
+.public-story .radar .orbit-label{position:relative;color:#17604e;font-size:11px;font-weight:800;opacity:1}
+.public-story .radar[data-story-state="waiting"] .radar-point{--nx-orbit-angle:var(--nx-orbit-start)}
+.public-story .radar[data-story-state="waiting"] .orbit-badge::before{background:#21bba3;border-color:transparent;scale:.19 .35}
+.public-story .radar[data-story-state="waiting"] .orbit-label{opacity:0}
+@media(prefers-reduced-motion:no-preference){
+ .public-story[data-story-ready="true"] .radar .radar-point{transition:transform 1550ms cubic-bezier(.25,.6,.35,1)}
+ .public-story[data-story-ready="true"] .radar .orbit-badge{transition:transform 1550ms cubic-bezier(.25,.6,.35,1)}
+ .public-story[data-story-ready="true"] .radar .orbit-badge::before{transition:scale 850ms ease 400ms,background 850ms ease 400ms,border-color 850ms ease 400ms}
+ .public-story[data-story-ready="true"] .radar .orbit-label{transition:opacity 450ms ease 800ms}
+}
+@media(prefers-reduced-motion:reduce){.public-story [data-story-axis]{translate:none!important;transition:none!important}}
+/* Experimental desktop mist: noninteractive, low contrast, no particles. */
+.public-story .nx-cursor-mist{display:none}
+@media(min-width:1051px) and (hover:hover) and (pointer:fine) and (prefers-reduced-motion:no-preference){
+ .public-story .nx-cursor-mist{
+  display:block;position:fixed;top:0;left:0;z-index:30;pointer-events:none;
+  width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;
+  background:radial-gradient(ellipse at 40% 43%,#78a89b22 0%,#779b9011 37%,transparent 70%);
+  opacity:0;transform:translate3d(-200px,-200px,0);
+  transition:opacity 300ms ease,transform 110ms ease-out;
+ }
+ .public-story .nx-cursor-mist[data-mist="moving"]{opacity:.36}
+}
