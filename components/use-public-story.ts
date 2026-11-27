@@ -16,8 +16,9 @@ type Group={items:HTMLElement[];anchor:HTMLElement;shown:boolean;radar:boolean;t
 function topOf(el:HTMLElement){let y=0;let node:HTMLElement|null=el;while(node){y+=node.offsetTop;node=node.offsetParent as HTMLElement|null;}return y;}
 export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
  useEffect(()=>{
-  const root=ref.current;
-  if(!root||typeof window.matchMedia!=='function')return;
+  const node=ref.current;
+  if(!node||typeof window.matchMedia!=='function')return;
+  const root:HTMLElement=node;
   const motion=window.matchMedia('(prefers-reduced-motion: reduce)');
   let groups:Group[]=[];let frame=0;let resizeFrame=0;let running=false;let lastY=window.scrollY;let width=window.innerWidth;
   const managed=new Set<HTMLElement>();
