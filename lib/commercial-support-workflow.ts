@@ -14,6 +14,7 @@ export function change(r:Record<string,any>,b:Record<string,any>,actor:{uid:stri
  if(!Array.isArray(history)||history.length>=100)throw Error('SUPPORT_HISTORY_LIMIT');
  return {status:b.status,workflowRevision:revision+1,assignedTo:actor.uid,workflowHistory:[...history,{actor:actor.uid,role:actor.role,at,from:r.status,to:b.status,reply:reply||null}]};
 }
-export function customerView(id:string,r:Record<string,any>){
- return {id,kind:r.kind,subject:r.subject,status:r.status,appId:r.appId??null,date:r.createdAt?.toMillis?.()??null,replies:(Array.isArray(r.workflowHistory)?r.workflowHistory:[]).filter(e=>typeof e.reply==='string'&&e.reply.length>0).map(e=>({date:e.at,text:e.reply}))};
+export function customerView(id:string,r:Record<string,any>,includeReplies=true){
+ const replies=(Array.isArray(r.workflowHistory)?r.workflowHistory:[]).filter(e=>e&&typeof e.reply==='string'&&e.reply.length>0);
+ return {id,kind:r.kind,subject:r.subject,status:r.status,appId:r.appId??null,date:r.createdAt?.toMillis?.()??null,replyCount:replies.length,...(includeReplies?{replies:replies.map(e=>({date:e.at,text:e.reply}))}:{})};
 }

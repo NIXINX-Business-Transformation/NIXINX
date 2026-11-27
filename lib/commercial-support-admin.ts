@@ -27,6 +27,13 @@ export async function staffSupport(req:NextRequest,db:FirebaseFirestore.Firestor
    if(code==='SUPPORT_NOT_FOUND')return fail(code,404);
    if(['SUPPORT_STALE','SUPPORT_TRANSITION_INVALID','SUPPORT_REPLY_INVALID','SUPPORT_HISTORY_LIMIT'].includes(code))return fail(code,409);throw e;}
  }
+ if(b.operation==='detail'){
+  if(!validRef(b.id))return fail('INVALID_REQUEST');
+  const snap=await col.doc(b.id).get();
+  if(!snap.exists)return fail('SUPPORT_NOT_FOUND',404);
+  const r=snap.data()!;
+  return result({id:snap.id,status:r.status,revision:r.workflowRevision??0,history:Array.isArray(r.workflowHistory)?r.workflowHistory:[],assignedTo:r.assignedTo??null});
+ }
  if(b.operation!=='list')return fail('INVALID_REQUEST');
  const kind=str(b.kind),status=str(b.status),customer=str(b.customer).toLowerCase(),from=str(b.from),to=str(b.to);
  if(customer.length>160||(kind&&!kinds.includes(kind))||(status&&!statuses.includes(status))||(from&&!day(from))||(to&&!day(to))||(from&&to&&from>to))return fail('INVALID_FILTER');
@@ -36,8 +43,8 @@ export async function staffSupport(req:NextRequest,db:FirebaseFirestore.Firestor
  const uids=[...new Set(docs.map(d=>d.get('uid')).filter((v):v is string=>typeof v==='string'&&v.length>0&&v.length<=128&&!v.includes('/')))];
  const profiles=new Map<string,FirebaseFirestore.DocumentSnapshot>();
  if(uids.length){const values=await db.getAll(...uids.map(uid=>db.collection('commercial_profiles').doc(uid)));values.forEach(v=>profiles.set(v.id,v));}
- const items=docs.flatMap(d=>{const r=d.data(),p=profiles.get(r.uid),v=customerView(d.id,r),name=str(p?.get('company')),acronym=str(p?.get('acronym')),email=str(r.email);
+ const items=docs.flatMap(d=>{const r=d.data(),p=profiles.get(r.uid),v=customerView(d.id,r,false),name=str(p?.get('company')),acronym=str(p?.get('acronym')),email=str(r.email);
  if((customer&&![name,acronym,email,r.uid].some(x=>typeof x==='string'&&x.toLowerCase().includes(customer)))||(kind&&r.kind!==kind)||(status&&r.status!==status)||(from&&(v.date===null||v.date<Date.parse(from+'T00:00:00Z')))||(to&&(v.date===null||v.date>=Date.parse(to+'T00:00:00Z')+86400000)))return [];
- return [{...v,customer:name||email,acronym,description:str(r.description),revision:r.workflowRevision??0,assignedTo:r.assignedTo??null,history:r.workflowHistory??[],notification:r.internalNotification?.status??null}];});
+ return [{...v,customer:name||email,acronym,description:str(r.description),revision:r.workflowRevision??0,assignedTo:r.assignedTo??null,historyCount:Array.isArray(r.workflowHistory)?r.workflowHistory.length:0,notification:r.internalNotification?.status??null}];});
  return result({items,cursor:snap.size>25?docs.at(-1)!.id:null,scanned:docs.length});
 }
