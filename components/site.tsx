@@ -7,6 +7,7 @@ import { words } from '@/lib/i18n';
 import {BrandMark,Wordmark,PillarIcon} from '@/components/brand';
 import {executiveCopy} from '@/lib/executive-copy';
 import {usePublicStory} from '@/components/use-public-story';
+import {useCursorMist} from '@/components/use-cursor-mist';
 import './public-story.css';
 
 type TurnstileClient={render:(element:HTMLElement,settings:Record<string,unknown>)=>string;reset?:()=>void};
@@ -46,6 +47,7 @@ export default function Site({locale}:{locale:Locale}){
   const t=words[locale];const e=executiveCopy[locale];const [menu,setMenu]=useState(false);
   const story=useRef<HTMLElement>(null);
   usePublicStory(story,locale);
+  useCursorMist(story);
   useEffect(()=>{document.documentElement.lang=locale},[locale]);
   return <>
     <header className="site-header"><div className="nav-wrap"><Link className="logo" href={`/${locale}`} aria-label="NIXINX"><BrandMark/><Wordmark/></Link>
@@ -66,11 +68,12 @@ export default function Site({locale}:{locale:Locale}){
       <section className="section stages"><div className="section-heading"><div><span className="tag">{t.maturityTag}</span><h2>{t.maturityTitle}</h2></div><div className="heading-decoration">01—04</div></div><div className="stage-list">{t.maturity.map(([num,title,copy])=><article key={num} className="stage-item"><span>{num}</span><h3>{title}</h3><p>{copy}</p><b aria-hidden="true">↗</b></article>)}</div></section>
       <section className="section capabilities" id="capabilities"><div className="section-heading"><div><span className="tag">{t.capTag}</span><h2>{t.capTitle}</h2></div><p>{t.capIntro}</p></div><div className="capability-grid">{t.capabilities.map(([name,tag,desc],i)=><article key={name} className={'capability cap-'+i}><div className="cap-top"><span className="cap-icon">{icons[i]}</span><small>{tag}</small></div><div><h3>{name}</h3><p>{desc}</p></div><span className="cap-number">0{i+1}</span></article>)}</div></section>
       <section className="section architecture" id="architecture"><div className="section-heading"><div><span className="tag">{t.architectureTag}</span><h2>{t.architectureTitle}</h2></div><p>{t.architectureDesc}</p></div><div className="architecture-flow">{t.flow.map(([num,title,copy],i)=><div className="flow-with-arrow" key={num}><article className={'flow-node flow-'+i}><small>{num}</small><span className="flow-symbol">{['⌘','▤','✳','↗'][i]}</span><h3>{title}</h3><p>{copy}</p></article>{i<3&&<div className="flow-arrow" aria-hidden="true">→</div>}</div>)}</div><div className="arch-footer"><span className="arch-shield">◈</span><p>{t.architectureFoot}</p></div></section>
-      <section className="section industries" id="industries"><div className="industry-copy"><span className="tag">{t.industriesTag}</span><h2>{t.industriesTitle}</h2><p>{t.industriesDesc}</p><div className="radar"><div className="radar-ring one"/><div className="radar-ring two"/><div className="radar-center"><BrandMark/></div><div className="radar-point p1"/><div className="radar-point p2"/><div className="radar-point p3"/></div></div><div className="industry-list">{t.industries.map((label,i)=><div key={label}><span>0{i+1}</span><strong>{label}</strong><span aria-hidden="true">↗</span></div>)}</div></section>
+      <section className="section industries" id="industries"><div className="industry-copy"><span className="tag">{t.industriesTag}</span><h2>{t.industriesTitle}</h2><p>{t.industriesDesc}</p><div className="radar"><div className="radar-ring one"/><div className="radar-ring two"/><div className="radar-center"><BrandMark/></div>{["Apps","MI","PM"].map((label,i)=><div key={label} className={"radar-point p"+(i+1)}><span className="orbit-badge"><span className="orbit-label">{label}</span></span></div>)}</div></div><div className="industry-list">{t.industries.map((label,i)=><div key={label}><span>0{i+1}</span><strong>{label}</strong><span aria-hidden="true">↗</span></div>)}</div></section>
       <section className="section usecases" id="results"><span className="tag">{t.casesTag}</span><h2>{t.casesTitle}</h2><div className="usecase-grid">{t.cases.map(([name,desc],i)=><article key={name}><span className="usecase-icon">{['↗','≋','◎'][i]}</span><h3>{name}</h3><p>{desc}</p></article>)}</div></section>
       <section className="section assessment-promo"><div><span className="tag">{t.assessment.tag}</span><h2>{t.assessment.headline}</h2><p>{t.assessment.sub}</p></div><Link className="button primary" href={`/${locale}/assessment`}>{t.assessment.homeButton} <span aria-hidden="true">↗</span></Link></section>
       <section className="section commercial" id="business"><div className="section-heading"><div><span className="tag">{t.businessTag}</span><h2>{t.businessTitle}</h2></div></div><div className="revenue-grid">{t.revenue.map(([name,desc],i)=><article key={name}><div className="revenue-top"><span>0{i+1}</span><b aria-hidden="true">↗</b></div><h3>{name}</h3><p>{desc}</p></article>)}</div><p className="business-note">{t.businessNote}</p></section>
       <section className="section contact" id="contact"><div><span className="tag">{t.contactTag}</span><h2>{t.contactTitle}</h2><p>{t.contactDesc}</p><div className="contact-deco"><div className="contact-pulse"/>NIXINX <span>·</span> BUSINESS TRANSFORMATION</div></div><LeadForm locale={locale}/></section>
+      <div className="nx-cursor-mist" aria-hidden="true"/>
     </main><footer className="footer"><div><span className="footer-word"><Wordmark/></span><p>{t.footer}</p></div><div className="footer-links"><Link href={`/${locale}/privacy`}>{t.privacy}</Link><a href="#top">↑</a></div><small>© {new Date().getFullYear()} NIXINX. {t.copyright}</small></footer>
   </>;
 }

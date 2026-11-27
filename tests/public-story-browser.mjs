@@ -10,43 +10,48 @@ for(const engine of [chromium,webkit]){
   await ctx.route('**/*',route=>new URL(route.request().url()).origin===base&&!route.request().url().includes('/api/')?route.continue():route.abort());
   const page=await ctx.newPage();
   for(const [width,height] of sizes){
-   await page.setViewportSize({width,height});
-   await page.goto(base+'/'+locale);
-   await page.locator('.public-story[data-story-mode="trigger"]').waitFor();
-   const initial=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,head:document.querySelector('h1').textContent}));
+   await page.setViewportSize({width,height});await page.goto(base+'/'+locale);
+   await page.locator('.public-story[data-story-ready="true"]').waitFor();
+   const initial=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,head:document.querySelector('h1').textContent}));
    assert.equal(await page.locator('.site-header .nav-login').count(),1);
-   await page.evaluate(()=>{document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,100)});
-   await page.locator('.public-story[data-story-hero="exit"]').waitFor();
-   await page.waitForFunction(small=>parseFloat(getComputedStyle(document.querySelector('.hero-facade'),small?'::after':null).scale)<.98,width<=750);
+   const move=async(selector,fraction)=>page.evaluate(({selector,fraction})=>{let e=document.querySelector(selector),y=0;while(e){y+=e.offsetTop;e=e.offsetParent;}document.documentElement.style.scrollBehavior='auto';window.scrollTo(0,y-innerHeight*fraction)},{selector,fraction});
    const first=page.locator('.stage-item').first();
-   assert.equal(await first.getAttribute('data-story-state'),'armed');
-   await page.evaluate(()=>{const el=document.querySelector('.stage-item');window.scrollTo(0,window.scrollY+el.getBoundingClientRect().top-innerHeight*.65)});
-   await page.waitForFunction(()=>document.querySelector('.stage-item')?.getAttribute('data-story-state')==='running');
-   const snapshot=()=>page.evaluate(()=>{const el=document.querySelector('.stage-item');return {scroll:window.scrollY,dy:el.getBoundingClientRect().top,translate:parseFloat(getComputedStyle(el).translate.split(' ')[1]||'0'),row:[...document.querySelectorAll('.stage-item')].map(x=>({state:x.getAttribute('data-story-state'),delay:getComputedStyle(x).animationDelay}))};});
-   const start=await snapshot();
-   if(width>750){
-    assert.equal(start.row[1].state,'running','same row launched by one trigger');
-    assert.ok(parseFloat(start.row[1].delay)>parseFloat(start.row[0].delay),'stagger');
+   assert.equal(await first.getAttribute('data-story-state'),'waiting');
+   await move('.stage-item',.55);
+   await page.waitForFunction(()=>document.querySelector('.stage-item').dataset.storyState==='shown');
+   const scroll=await page.evaluate(()=>window.scrollY);
+   const sample=()=>first.evaluate(el=>{const v=getComputedStyle(el).translate;return v==='none'?0:parseFloat(v.split(' ')[1]||'0')});
+   await page.waitForFunction(()=>{const v=getComputedStyle(document.querySelector('.stage-item')).translate;return parseFloat(v.split(' ')[1]||'0')>5});
+   const start=await sample();
+   await page.waitForFunction(p=>{const v=getComputedStyle(document.querySelector('.stage-item')).translate;return parseFloat(v.split(' ')[1]||'0')<p-3},start);
+   await page.waitForFunction(()=>{const v=getComputedStyle(document.querySelector('.stage-item')).translate;return v==='none'||Math.abs(parseFloat(v.split(' ')[1]||'0'))<.1});
+   assert.ok(Math.abs(await page.evaluate(()=>window.scrollY)-scroll)<1,'autonomous completion at fixed scroll');
+   if(width>750){assert.equal(await page.locator('.stage-item').nth(1).getAttribute('data-story-state'),'shown');assert.equal(await page.locator('.stage-item').nth(1).evaluate(el=>el.style.getPropertyValue('--nx-story-delay')),'125ms');}
+   await move('.stage-item',1.05);
+   await page.waitForFunction(()=>document.querySelector('.stage-item').dataset.storyState==='waiting');
+   await page.waitForFunction(()=>parseFloat(getComputedStyle(document.querySelector('.stage-item')).translate.split(' ')[1]||'0')>20);
+   await move('.stage-item',.55);
+   await page.waitForFunction(()=>document.querySelector('.stage-item').dataset.storyState==='shown');
+   await move('.radar',.5);
+   await page.waitForFunction(()=>document.querySelector('.radar').dataset.storyState==='shown');
+   assert.deepEqual(await page.locator('.orbit-label').allTextContents(),['Apps','MI','PM']);
+   assert.equal(await page.locator('.vision > div').first().getAttribute('data-story-axis'),'right');
+   assert.equal(await page.locator('.flow-with-arrow').first().getAttribute('data-story-axis'),'right');
+   assert.equal(await page.locator('.industry-list > div').first().getAttribute('data-story-axis'),'left');
+   if(width>=1051){
+    await page.mouse.move(width/2,height/2);
+    const eligible=await page.evaluate(()=>matchMedia('(min-width:1051px) and (hover:hover) and (pointer:fine)').matches&&navigator.maxTouchPoints<2);
+    if(eligible){await page.evaluate(()=>{document.querySelector('.public-story').dispatchEvent(new PointerEvent('pointermove',{pointerType:'mouse',clientX:350,clientY:300,bubbles:true}));});await page.locator('.nx-cursor-mist[data-mist="moving"]').waitFor({state:'attached'});await page.locator('.nx-cursor-mist[data-mist="moving"]').waitFor({state:'detached'});}
    }
-   await page.waitForFunction(previous=>{const e=document.querySelector('.stage-item');return parseFloat(getComputedStyle(e).translate.split(' ')[1]||'0')<previous-8},start.translate);
-   const middle=await snapshot();
-   assert.ok(Math.abs(middle.scroll-start.scroll)<1,'scroll remained fixed during animation');
-   assert.ok(middle.dy<start.dy-8,'visible autonomous motion');
-   await page.waitForFunction(()=>!document.querySelector('.stage-item').hasAttribute('data-story-state'));
-   const done=await snapshot();
-   assert.ok(Math.abs(done.scroll-start.scroll)<1,'animation finished without further scrolling');
-   await page.evaluate(()=>window.scrollTo(0,0));
-   await page.waitForFunction(()=>!document.querySelector('.public-story').hasAttribute('data-story-hero'));
-   assert.equal(await first.getAttribute('data-story-state'),null,'one-shot');
    await page.emulateMedia({reducedMotion:'reduce'});
    await page.locator('.public-story[data-story-mode="off"]').waitFor();
    assert.equal(await page.locator('[data-story-state]').count(),0);
-   const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,head:document.querySelector('h1').textContent}));
-   assert.equal(initial.hero,end.hero);assert.equal(initial.nav,end.nav);assert.equal(initial.head,end.head);
-   assert.ok(initial.overflow<=1,'horizontal overflow '+locale+' '+width+': '+initial.overflow);
-   assert.ok(end.overflow<=1,'horizontal overflow reduced motion');
+   assert.equal(await page.locator('.nx-cursor-mist').evaluate(el=>getComputedStyle(el).display),'none');
+   await page.evaluate(()=>window.scrollTo(0,0));
+   const end=await page.evaluate(()=>({hero:document.querySelector('.executive-hero').offsetHeight,nav:document.querySelector('.site-header').offsetHeight,head:document.querySelector('h1').textContent,overflow:document.documentElement.scrollWidth-document.documentElement.clientWidth}));
+   assert.equal(initial.hero,end.hero);assert.equal(initial.nav,end.nav);assert.equal(initial.head,end.head);assert.ok(end.overflow<=1,'horizontal overflow');
    await page.emulateMedia({reducedMotion:'no-preference'});
-   console.log('PASS',engine.name(),locale,width,height,'autonomous motion at fixed scroll');
+   console.log('PASS',engine.name(),locale,width,height,'reversible autonomous motion');
   }
   await ctx.close();
  }

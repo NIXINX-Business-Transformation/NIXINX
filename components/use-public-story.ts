@@ -1,8 +1,6 @@
 'use client';
 import {useEffect,type RefObject} from 'react';
 
-// Scroll is a starting signal, never an animation clock. Group visible rows
-// so a single intersection starts their entire time-based stagger.
 const singles=[
  '.hero-continuity > div:first-child','.vision > div',
  '.section-heading > div:first-child','.section-heading > p',
@@ -11,109 +9,93 @@ const singles=[
 ].join(',');
 const grids=[
  ['.stage-list','.stage-item'],['.capability-grid','.capability'],
- ['.architecture-flow','.flow-node'],['.industry-list',':scope > div'],
- ['.usecase-grid','article'],['.revenue-grid','article'],
+ ['.architecture-flow','.flow-with-arrow'],['.usecase-grid','article'],['.revenue-grid','article'],
 ];
+type Group={items:HTMLElement[];anchor:HTMLElement;shown:boolean;radar:boolean;threshold:number};
+// Layout coordinates, not transformed visual rectangles: no feedback from motion.
+function topOf(el:HTMLElement){let y=0;let node:HTMLElement|null=el;while(node){y+=node.offsetTop;node=node.offsetParent as HTMLElement|null;}return y;}
 export function usePublicStory(ref:RefObject<HTMLElement|null>,locale:string){
  useEffect(()=>{
   const root=ref.current;
   if(!root||typeof window.matchMedia!=='function')return;
   const motion=window.matchMedia('(prefers-reduced-motion: reduce)');
-  const consumed=new Set<HTMLElement>();
+  let groups:Group[]=[];let frame=0;let resizeFrame=0;let running=false;let lastY=window.scrollY;let width=window.innerWidth;
   const managed=new Set<HTMLElement>();
-  const groups=new Map<HTMLElement,HTMLElement[]>();
-  let observer:IntersectionObserver|undefined;
-  let width=window.innerWidth;
-  let running=false;
-  const reset=(el:HTMLElement)=>{
-   el.removeAttribute('data-story-state');el.style.removeProperty('--nx-story-delay');managed.delete(el);
-  };
-  const clear=()=>{
-   observer?.disconnect();observer=undefined;groups.clear();
-   for(const el of managed)reset(el);
-  };
-  const play=(group:HTMLElement[])=>{
-   for(const el of group){
-    consumed.add(el);
-    if(el.matches(':focus-within'))reset(el);
-    else el.dataset.storyState='running';
-   }
-  };
-  const setup=()=>{
+  function clear(){
+   root.removeAttribute('data-story-ready');
+   root.removeAttribute('data-story-hero');
+   for(const el of managed){el.removeAttribute('data-story-state');el.removeAttribute('data-story-axis');el.style.removeProperty('--nx-story-delay');}
+   managed.clear();groups=[];
+  }
+  function add(items:HTMLElement[],axis='up',radar=false,random=false){
+   if(!items.length)return;
+   const anchor=items[0];
+   const shown=topOf(anchor)-window.scrollY<window.innerHeight*.88;
+   const order=items.map((_,i)=>i);
+   if(random){for(let i=order.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[order[i],order[j]]=[order[j],order[i]];}if(order.every((v,i)=>v===i)&&order.length>1)order.push(order.shift()!);}
+   items.forEach((el,i)=>{
+    managed.add(el);el.dataset.storyAxis=axis;el.dataset.storyState=shown?'shown':'waiting';
+    el.style.setProperty('--nx-story-delay',order.indexOf(i)*125+'ms');
+   });
+   groups.push({items,anchor,shown,radar,threshold:radar?.75:.78});
+  }
+  function setup(){
    clear();
    if(!running)return;
-   const vh=window.innerHeight;
-   const candidates:HTMLElement[][]=Array.from(root.querySelectorAll<HTMLElement>(singles),el=>[el]);
+   for(const el of root.querySelectorAll<HTMLElement>(singles))add([el],el.matches('.vision > div:first-child')?'right':'up');
    for(const [container,selector] of grids){
     for(const grid of root.querySelectorAll(container)){
      const rows:HTMLElement[][]=[];
      for(const el of grid.querySelectorAll<HTMLElement>(selector)){
       const last=rows[rows.length-1];
-      if(last&&Math.abs(last[0].getBoundingClientRect().top-el.getBoundingClientRect().top)<4)last.push(el);
-      else rows.push([el]);
+      if(last&&Math.abs(topOf(last[0])-topOf(el))<4)last.push(el);else rows.push([el]);
      }
-     candidates.push(...rows);
+     for(const row of rows)add(row,container==='.architecture-flow'?'right':'up');
     }
    }
-   observer=new IntersectionObserver(entries=>{
-    for(const entry of entries){
-     if(!entry.isIntersecting)continue;
-     const anchor=entry.target as HTMLElement;
-     const group=groups.get(anchor);
-     if(!group)continue;
-     observer?.unobserve(anchor);groups.delete(anchor);play(group);
-    }
-   },{rootMargin:'0px 0px -10% 0px',threshold:0.01});
-   for(const row of candidates){
-    // Do not reposition anything that was already visible on first paint,
-    // on deep links, after a resize, or when motion preferences change.
-    const group=row.filter(el=>!consumed.has(el)&&el.getBoundingClientRect().top>=vh);
-    if(!group.length)continue;
-    group.forEach((el,i)=>{
-     el.style.setProperty('--nx-story-delay',Math.min(i,5)*125+'ms');
-     managed.add(el);el.dataset.storyState='armed';
-    });
-    groups.set(group[0],group);observer.observe(group[0]);
+   for(const list of root.querySelectorAll<HTMLElement>('.industry-list')){
+    const items=Array.from(list.querySelectorAll<HTMLElement>(':scope > div'));
+    // Keep the actual semantic DOM order; randomize only the start times.
+    if(window.innerHeight>=560)add(items,'left',false,true);
+    else for(const el of items)add([el],'left');
    }
-  };
-  const heroExit=()=>{
-   // Only a discrete threshold changes state. CSS owns the whole transition.
-   if(window.scrollY>72)root.dataset.storyHero='exit';
-   else if(window.scrollY<=12)delete root.dataset.storyHero;
-  };
-  const resize=()=>{if(window.innerWidth!==width){width=window.innerWidth;setup();}};
-  const finished=(event:AnimationEvent)=>{
-   if(event.animationName!=='nx-public-rise')return;
-   if(event.target instanceof HTMLElement&&managed.has(event.target))reset(event.target);
-  };
-  const focus=(event:FocusEvent)=>{
-   if(!(event.target instanceof Element))return;
-   const el=event.target.closest<HTMLElement>('[data-story-state]');
-   if(!el||!managed.has(el))return;
-   for(const [anchor,group] of groups){
-    if(!group.includes(el))continue;
-    observer?.unobserve(anchor);groups.delete(anchor);
-    for(const member of group){consumed.add(member);reset(member);}
-    return;
+   const radar=root.querySelector<HTMLElement>('.radar');if(radar)add([radar],'orbit',true);
+   lastY=window.scrollY;
+   if(lastY>72)root.dataset.storyHero='exit';
+   // Flush the static starting states before enabling timed transitions.
+   void root.offsetHeight;root.dataset.storyReady='true';
+  }
+  function tick(){
+   frame=0;if(!running)return;
+   const y=window.scrollY,vh=window.innerHeight,down=y>=lastY;
+   // A single threshold crossing switches state; CSS completes the sequence
+   // without additional wheel events. Hysteresis prevents flicker at the line.
+   const changes:Group[]=[];
+   for(const group of groups){
+    const top=topOf(group.anchor)-y;
+    const focused=group.items.some(el=>el.matches(':focus-within'));
+    const next=focused?true:group.shown?!( !down&&top>vh*.90):top<vh*group.threshold;
+    if(next!==group.shown){group.shown=next;changes.push(group);}
    }
-   consumed.add(el);reset(el);
-  };
-  const stop=()=>{
-   running=false;clear();delete root.dataset.storyHero;
-   window.removeEventListener('scroll',heroExit);window.removeEventListener('resize',resize);
-   root.removeEventListener('animationend',finished);root.removeEventListener('animationcancel',finished);root.removeEventListener('focusin',focus);
-  };
-  const start=()=>{
+   if(y>72)root.dataset.storyHero='exit';else if(y<=12)delete root.dataset.storyHero;
+   lastY=y;
+   for(const group of changes)for(const el of group.items)el.dataset.storyState=group.shown?'shown':'waiting';
+  }
+  function schedule(){if(running&&!frame)frame=requestAnimationFrame(tick);}
+  function resize(){if(window.innerWidth===width)return;width=window.innerWidth;if(resizeFrame)cancelAnimationFrame(resizeFrame);resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;setup();});}
+  function stop(){
+   running=false;if(frame)cancelAnimationFrame(frame);if(resizeFrame)cancelAnimationFrame(resizeFrame);frame=resizeFrame=0;
+   window.removeEventListener('scroll',schedule);window.removeEventListener('resize',resize);
+   root.removeEventListener('focusin',schedule);clear();
+  }
+  function start(){
    stop();
-   if(motion.matches||typeof IntersectionObserver==='undefined'||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
-   running=true;width=window.innerWidth;setup();heroExit();
-   window.addEventListener('scroll',heroExit,{passive:true});window.addEventListener('resize',resize,{passive:true});
-   root.addEventListener('animationend',finished);root.addEventListener('animationcancel',finished);root.addEventListener('focusin',focus);
-   root.dataset.storyMode='trigger';
-  };
+   if(motion.matches||typeof CSS==='undefined'||!CSS.supports('translate','0 1px')){root.dataset.storyMode='off';return;}
+   running=true;width=window.innerWidth;root.dataset.storyMode='trigger';setup();
+   window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',resize,{passive:true});root.addEventListener('focusin',schedule);
+  }
   start();
-  if(typeof motion.addEventListener==='function')motion.addEventListener('change',start);
-  else motion.addListener(start);
+  if(typeof motion.addEventListener==='function')motion.addEventListener('change',start);else motion.addListener(start);
   return ()=>{stop();delete root.dataset.storyMode;if(typeof motion.removeEventListener==='function')motion.removeEventListener('change',start);else motion.removeListener(start);};
  },[ref,locale]);
 }
