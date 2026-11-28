@@ -51,7 +51,13 @@ export async function POST(request:NextRequest) {
       });
     });
     // The lead is already committed. A transport or audit error must not turn a saved lead into a failed submission.
-    const notification=await notifyMarketingLead(leadRef.id,process.env,async limit=>{
+    const notification=await notifyMarketingLead(leadRef.id,{
+      LEAD_NOTIFICATIONS_ENABLED:process.env.LEAD_NOTIFICATIONS_ENABLED,
+      LEAD_NOTIFY_EMAIL:process.env.LEAD_NOTIFY_EMAIL,
+      LEAD_NOTIFICATION_DAILY_LIMIT:process.env.LEAD_NOTIFICATION_DAILY_LIMIT,
+      RESEND_API_KEY:process.env.RESEND_API_KEY,
+      RESEND_FROM_EMAIL:process.env.RESEND_FROM_EMAIL,
+    },async limit=>{
       const day=Math.floor(Date.now()/86400000);
       const budgetRef=db.collection('marketing_lead_rate_limits').doc('notification-utc-day-'+day);
       return db.runTransaction(async tx=>{
