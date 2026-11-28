@@ -16,3 +16,4 @@ jobs:
       - run: node --test tests/organization-acronym.test.mjs tests/commercial-profile-validation.test.mjs tests/commercial-fiscal-endpoint.test.mjs tests/commercial-support-endpoint.test.mjs
       - run: npm run typecheck
       - run: npm run build
+      - run: node --test tests/assessment-event-notification.test.mjs
